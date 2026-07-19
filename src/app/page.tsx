@@ -863,23 +863,34 @@ export default function Home() {
                   <div aria-live="polite" aria-busy={loading}>
                     {visibleMessages.length > 0 ? (
                       <div className="space-y-4">
-                        {visibleMessages.map((m, i) =>
-                          m.role === "user" ? (
-                            <div
-                              key={i}
-                              className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-primary/10 px-3.5 py-2 text-sm text-foreground"
-                            >
-                              {m.content}
-                            </div>
-                          ) : (
+                        {visibleMessages.map((m, i) => {
+                          if (m.role === "user") {
+                            return (
+                              <div
+                                key={i}
+                                className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-primary/10 px-3.5 py-2 text-sm text-foreground"
+                              >
+                                {m.content}
+                              </div>
+                            );
+                          }
+                          // Mensaje en curso: texto plano (fluido, sin re-parsear
+                          // Markdown en cada frame). Al terminar, se formatea.
+                          const streaming =
+                            loading && i === visibleMessages.length - 1;
+                          return (
                             <div key={i}>
-                              <Markdown>{m.content}</Markdown>
-                              {loading && i === visibleMessages.length - 1 && (
-                                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary align-middle" />
+                              {streaming ? (
+                                <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                                  {m.content}
+                                  <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary align-middle" />
+                                </div>
+                              ) : (
+                                <Markdown>{m.content}</Markdown>
                               )}
                             </div>
-                          )
-                        )}
+                          );
+                        })}
                       </div>
                     ) : loading ? (
                       <Skeleton />
