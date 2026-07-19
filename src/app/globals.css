@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Paleta clara (por defecto) */
+:root {
+  --bg: 245 246 248; /* #F5F6F8 */
+  --surface: 255 255 255; /* #FFFFFF */
+  --surface-2: 249 250 251; /* #F9FAFB */
+  --border: 235 237 240; /* #EBEDF0 */
+  --fg: 15 23 41; /* casi negro */
+  --muted: 107 114 128; /* gray-500 */
+  --primary: 37 99 235; /* blue-600 */
+  color-scheme: light;
+}
+
+/* Paleta oscura */
+.dark {
+  --bg: 15 16 20; /* #0F1014 */
+  --surface: 24 25 30; /* #18191E */
+  --surface-2: 32 33 39; /* #202127 */
+  --border: 42 44 52; /* #2A2C34 */
+  --fg: 236 238 242;
+  --muted: 148 155 168;
+  --primary: 96 165 250; /* blue-400 */
+  color-scheme: dark;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+  min-height: 100vh;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-border bg-surface shadow-soft;
+  }
+}
+
+/* Scrollbar sutil */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--muted) / 0.3);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--muted) / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
