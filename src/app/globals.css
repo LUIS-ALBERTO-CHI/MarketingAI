@@ -38,6 +38,21 @@ body {
   }
 }
 
+/* Radix ScrollArea: su viewport envuelve el contenido en un div con
+   display:table + min-width:100%, que usa el ancho "preferido" y provoca
+   desbordes horizontales en móvil. Lo forzamos a bloque para que el contenido
+   se ajuste al ancho disponible (y funcione truncate). */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+  min-width: 0 !important;
+}
+
+/* Evita cualquier scroll horizontal accidental a nivel de página. */
+html,
+body {
+  overflow-x: hidden;
+}
+
 /* Scrollbar sutil */
 ::-webkit-scrollbar {
   width: 10px;

@@ -19,6 +19,8 @@ import {
   RotateCcw,
   X,
   ChevronDown,
+  Menu,
+  History,
 } from "lucide-react";
 import { TOOLS, getTool, FREE_TOOL, systemFor, ACCOUNT_FIELD } from "@/lib/tools";
 import { ToolIcon } from "@/components/Icon";
@@ -42,6 +44,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import type { ToolField } from "@/lib/tools";
 
 const CHIPS = [
@@ -102,6 +105,8 @@ export default function Home() {
   const [dark, setDark] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
+  const [navOpen, setNavOpen] = useState(false); // drawer navegación (móvil)
+  const [histOpen, setHistOpen] = useState(false); // drawer historial (móvil)
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const tool = useMemo(
@@ -188,17 +193,20 @@ export default function Home() {
     setSyntheticFirst(conv.syntheticFirst);
     setFollowup("");
     setCurrentConvId(conv.id);
+    setHistOpen(false);
   }
 
   function openTool(id: string) {
     setSelectedId(id);
     setInputs({});
     resetConversation();
+    setNavOpen(false);
   }
   function goHome() {
     setSelectedId(null);
     setInputs({});
     resetConversation();
+    setNavOpen(false);
   }
   function updateField(name: string, value: string) {
     setInputs((prev) => ({ ...prev, [name]: value }));
@@ -212,8 +220,6 @@ export default function Home() {
   const hasAssistant = messages.some((m) => m.role === "assistant" && m.content);
   const showComposer = isFree || hasAssistant;
 
-  // Ejecuta un turno: envía system + baseMsgs, transmite la respuesta y
-  // guarda/actualiza la conversación en el historial.
   async function runTurn(
     system: string,
     baseMsgs: Msg[],
@@ -258,7 +264,6 @@ export default function Home() {
         if (!rafId) rafId = requestAnimationFrame(flush);
       }
       if (rafId) cancelAnimationFrame(rafId);
-      // Flush final para asegurar que se muestra el contenido completo.
       setMessages([...baseMsgs, { role: "assistant", content: acc }]);
       bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
       if (acc && !acc.startsWith("**[Error")) {
@@ -289,14 +294,13 @@ export default function Home() {
     }
   }
 
-  // Primer turno desde el formulario de una herramienta.
   function generate() {
     if (!selectedId || loading || missingRequired) return;
     const t = getTool(selectedId);
     if (!t) return;
     const convId = newId();
     setCurrentConvId(convId);
-    setSyntheticFirst(true); // ocultamos el prompt sintético del formulario
+    setSyntheticFirst(true);
 
     let content = t.buildPrompt(inputs);
     const acct = inputs.cuenta?.trim();
@@ -311,7 +315,6 @@ export default function Home() {
     runTurn(systemFor(t), [{ role: "user", content }], t.id, t.name, convId, true, web);
   }
 
-  // Mensaje de seguimiento (continúa la conversación actual).
   function sendFollowup() {
     const text = followup.trim();
     if (!text || loading) return;
@@ -326,7 +329,6 @@ export default function Home() {
     runTurn(systemFor(t), base, t.id, t.name, convId, syntheticFirst);
   }
 
-  // Entrada libre del inicio → inicia una conversación con la herramienta "free".
   function submitHomePrompt() {
     const p = inputs.prompt?.trim();
     if (!p || loading) return;
@@ -394,157 +396,293 @@ export default function Home() {
     ...(activeTool.webAware ? [ACCOUNT_FIELD] : []),
   ];
 
-  return (
-    <div className="flex h-screen gap-3 bg-background p-3">
-      {/* ===================== SIDEBAR ===================== */}
-      <Card className="hidden w-64 shrink-0 flex-col p-4 lg:flex">
-        <button
+  // ---------- Contenido reutilizable (escritorio + cajón móvil) ----------
+  const sidebarBody = (
+    <>
+      <button
+        onClick={goHome}
+        className="mb-4 flex cursor-pointer items-center gap-2.5"
+      >
+        <LogoMark className="h-8 w-8" />
+        <span className="font-heading text-[15px] font-bold text-foreground">
+          MarketingAI
+        </span>
+      </button>
+
+      <div className="relative mb-3">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar herramienta"
+          className="bg-surface-2 py-2 pl-9 pr-9"
+        />
+        <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted">
+          ⌘K
+        </kbd>
+      </div>
+
+      <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
+        <Button
+          variant={selectedId === null ? "subtle" : "ghost"}
           onClick={goHome}
-          className="mb-4 flex cursor-pointer items-center gap-2.5"
+          className={`mb-1 h-9 w-full justify-start gap-3 px-3 font-medium ${
+            selectedId === null ? "text-foreground" : ""
+          }`}
         >
-          <LogoMark className="h-8 w-8" />
-          <span className="font-heading text-[15px] font-bold text-foreground">
-            MarketingAI
-          </span>
-        </button>
+          <HomeIcon className="h-5 w-5" /> Inicio
+        </Button>
 
-        <div className="relative mb-3">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar herramienta"
-            className="bg-surface-2 py-2 pl-9 pr-9"
-          />
-          <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted">
-            ⌘K
-          </kbd>
-        </div>
-
-        <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
-          <Button
-            variant={selectedId === null ? "subtle" : "ghost"}
-            onClick={goHome}
-            className={`mb-1 h-9 w-full justify-start gap-3 px-3 font-medium ${
-              selectedId === null ? "text-foreground" : ""
-            }`}
-          >
-            <HomeIcon className="h-5 w-5" /> Inicio
-          </Button>
-
-          <p className="mb-1 mt-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Herramientas
-          </p>
-          <div className="space-y-0.5">
-            {filteredTools.map((t) => {
-              const active = t.id === selectedId;
-              return (
-                <Button
-                  key={t.id}
-                  variant={active ? "subtle" : "ghost"}
-                  onClick={() => openTool(t.id)}
-                  aria-current={active ? "page" : undefined}
-                  className={`h-9 w-full justify-start gap-3 px-3 font-medium ${
-                    active ? "text-foreground" : ""
-                  }`}
-                >
-                  <span
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${chipFor(
-                      t.id
-                    )}`}
-                  >
-                    <ToolIcon name={t.icon} className="h-4 w-4" />
-                  </span>
-                  <span className="truncate">{t.name}</span>
-                </Button>
-              );
-            })}
-            {filteredTools.length === 0 && (
-              <p className="px-3 py-2 text-sm text-muted">Sin resultados</p>
-            )}
-          </div>
-        </ScrollArea>
-
-        <Separator className="my-3" />
-
-        <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
-          Ajustes
+        <p className="mb-1 mt-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
+          Herramientas
         </p>
-        <Button variant="ghost" className="h-9 w-full justify-start gap-3 px-3 font-medium">
-          <Settings className="h-5 w-5" /> Configuración
-        </Button>
-        <Button variant="ghost" className="h-9 w-full justify-start gap-3 px-3 font-medium">
-          <HelpCircle className="h-5 w-5" /> Ayuda
-        </Button>
-
-        <div className="mt-3 flex items-center gap-1 rounded-xl bg-surface-2 p-1">
-          <Button
-            variant={!dark ? "outline" : "ghost"}
-            size="sm"
-            onClick={() => toggleTheme(false)}
-            className={`flex-1 ${!dark ? "shadow-soft" : ""}`}
-          >
-            <Sun className="h-4 w-4" /> Claro
-          </Button>
-          <Button
-            variant={dark ? "outline" : "ghost"}
-            size="sm"
-            onClick={() => toggleTheme(true)}
-            className={`flex-1 ${dark ? "shadow-soft" : ""}`}
-          >
-            <Moon className="h-4 w-4" /> Oscuro
-          </Button>
+        <div className="space-y-0.5">
+          {filteredTools.map((t) => {
+            const active = t.id === selectedId;
+            return (
+              <Button
+                key={t.id}
+                variant={active ? "subtle" : "ghost"}
+                onClick={() => openTool(t.id)}
+                aria-current={active ? "page" : undefined}
+                className={`h-9 w-full justify-start gap-3 px-3 font-medium ${
+                  active ? "text-foreground" : ""
+                }`}
+              >
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${chipFor(
+                    t.id
+                  )}`}
+                >
+                  <ToolIcon name={t.icon} className="h-4 w-4" />
+                </span>
+                <span className="truncate">{t.name}</span>
+              </Button>
+            );
+          })}
+          {filteredTools.length === 0 && (
+            <p className="px-3 py-2 text-sm text-muted">Sin resultados</p>
+          )}
         </div>
+      </ScrollArea>
 
-        <div className="mt-3 flex items-center gap-2.5 px-1">
-          <Avatar>
-            <AvatarFallback className="bg-gradient-to-br from-primary to-violet-500">
-              LC
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-foreground">
-              Luis Casanova
-            </p>
-            <p className="truncate text-xs text-muted">luis.casanova@fwa.eu</p>
+      <Separator className="my-3" />
+
+      <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        Ajustes
+      </p>
+      <Button variant="ghost" className="h-9 w-full justify-start gap-3 px-3 font-medium">
+        <Settings className="h-5 w-5" /> Configuración
+      </Button>
+      <Button variant="ghost" className="h-9 w-full justify-start gap-3 px-3 font-medium">
+        <HelpCircle className="h-5 w-5" /> Ayuda
+      </Button>
+
+      <div className="mt-3 flex items-center gap-1 rounded-xl bg-surface-2 p-1">
+        <Button
+          variant={!dark ? "outline" : "ghost"}
+          size="sm"
+          onClick={() => toggleTheme(false)}
+          className={`flex-1 ${!dark ? "shadow-soft" : ""}`}
+        >
+          <Sun className="h-4 w-4" /> Claro
+        </Button>
+        <Button
+          variant={dark ? "outline" : "ghost"}
+          size="sm"
+          onClick={() => toggleTheme(true)}
+          className={`flex-1 ${dark ? "shadow-soft" : ""}`}
+        >
+          <Moon className="h-4 w-4" /> Oscuro
+        </Button>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2.5 px-1">
+        <Avatar>
+          <AvatarFallback className="bg-gradient-to-br from-primary to-violet-500">
+            LC
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-foreground">
+            Luis Casanova
+          </p>
+          <p className="truncate text-xs text-muted">luis.casanova@fwa.eu</p>
+        </div>
+      </div>
+    </>
+  );
+
+  const historyBody = (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-heading text-sm font-bold text-foreground">
+          Historial{" "}
+          <span className="font-normal text-muted">({conversations.length})</span>
+        </h2>
+        {conversations.length > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearHistory}
+            className="h-auto px-2 py-1 text-muted hover:text-foreground"
+          >
+            Limpiar
+          </Button>
+        )}
+      </div>
+      {conversations.length === 0 ? (
+        <div className="mt-6 flex flex-col items-center gap-2 px-4 text-center text-muted">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2">
+            <Sparkles className="h-5 w-5 opacity-60" />
           </div>
+          <p className="text-xs">Tus conversaciones se guardarán aquí.</p>
         </div>
+      ) : (
+        <>
+          <div className="relative mb-2">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+            <Input
+              value={histQuery}
+              onChange={(e) => setHistQuery(e.target.value)}
+              placeholder="Buscar en el historial"
+              className="bg-surface-2 py-1.5 pl-8 text-xs"
+            />
+          </div>
+          <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
+            <div className="space-y-2">
+              {filteredConvs.length === 0 && (
+                <p className="px-1 py-6 text-center text-xs text-muted">
+                  Sin resultados
+                </p>
+              )}
+              {filteredConvs.map((c) => {
+                const last = [...c.messages]
+                  .reverse()
+                  .find((m) => m.role === "assistant");
+                const snippet = (last?.content || "")
+                  .replace(/[#*`>|]/g, "")
+                  .trim()
+                  .slice(0, 70);
+                const active = c.id === currentConvId;
+                return (
+                  <div key={c.id} className="group relative">
+                    <Button
+                      variant="outline"
+                      onClick={() => openConversation(c)}
+                      className={`h-auto w-full flex-col items-start gap-1 rounded-xl bg-surface-2 p-3 pr-8 text-left hover:-translate-y-0.5 ${
+                        active ? "ring-2 ring-ring/40" : ""
+                      }`}
+                    >
+                      <span className="flex w-full items-center gap-2">
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${
+                            c.toolId === FREE_TOOL.id
+                              ? "bg-primary/10 text-primary"
+                              : chipFor(c.toolId)
+                          }`}
+                        >
+                          <ToolIcon
+                            name={getTool(c.toolId)?.icon ?? "Sparkles"}
+                            className="h-3 w-3"
+                          />
+                        </span>
+                        <span className="truncate text-xs font-semibold text-foreground">
+                          {c.title}
+                        </span>
+                      </span>
+                      <span className="line-clamp-2 whitespace-normal text-xs font-normal text-muted">
+                        {snippet}
+                      </span>
+                    </Button>
+                    <button
+                      onClick={() => deleteConversation(c.id)}
+                      title="Eliminar"
+                      aria-label="Eliminar conversación"
+                      className="absolute right-1.5 top-1.5 hidden h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted transition hover:bg-surface hover:text-rose-500 group-hover:flex"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+        </>
+      )}
+    </>
+  );
+
+  return (
+    <div className="flex h-screen gap-3 bg-background p-2 sm:p-3">
+      {/* ===================== SIDEBAR (escritorio) ===================== */}
+      <Card className="hidden w-64 shrink-0 flex-col p-4 lg:flex">
+        {sidebarBody}
       </Card>
+
+      {/* Cajón de navegación (móvil) */}
+      <Sheet open={navOpen} onOpenChange={setNavOpen}>
+        <SheetContent side="left" title="Navegación">
+          {sidebarBody}
+        </SheetContent>
+      </Sheet>
 
       {/* ===================== CENTRO ===================== */}
       <Card className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <div className="flex items-center gap-2 text-sm">
-            {selectedId ? (
-              <>
-                <Button
-                  variant="link"
-                  onClick={goHome}
-                  className="h-auto p-0 font-normal text-muted hover:text-foreground"
-                >
-                  Inicio
-                </Button>
-                <span className="text-muted">/</span>
-                <span className="font-semibold text-foreground">
-                  {activeTool.name}
-                </span>
-              </>
-            ) : (
-              <span className="font-semibold text-foreground">Inicio</span>
-            )}
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setNavOpen(true)}
+              aria-label="Abrir menú"
+              className="lg:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              {selectedId ? (
+                <>
+                  <Button
+                    variant="link"
+                    onClick={goHome}
+                    className="h-auto shrink-0 p-0 font-normal text-muted hover:text-foreground"
+                  >
+                    Inicio
+                  </Button>
+                  <span className="text-muted">/</span>
+                  <span className="truncate font-semibold text-foreground">
+                    {activeTool.name}
+                  </span>
+                </>
+              ) : (
+                <span className="font-semibold text-foreground">Inicio</span>
+              )}
+            </div>
           </div>
-          <span className="rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted">
-            Claude Opus 4.8
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="hidden rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted sm:inline-flex">
+              Claude Opus 4.8
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setHistOpen(true)}
+              aria-label="Abrir historial"
+              className="xl:hidden"
+            >
+              <History className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
 
         <ScrollArea className="min-h-0 flex-1" viewportRef={bodyRef}>
-          <div className="px-6 py-6">
+          <div className="px-4 py-6 sm:px-6">
             {selectedId === null ? (
               /* ---------- INICIO ---------- */
               <div className="mx-auto max-w-2xl">
-                <div className="mb-8 mt-4 text-center">
-                  <h1 className="font-heading text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
+                <div className="mb-8 mt-2 text-center sm:mt-4">
+                  <h1 className="font-heading text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl md:text-5xl">
                     Bienvenido a MarketingAI
                   </h1>
                   <p className="mx-auto mt-3 max-w-md text-muted">
@@ -600,7 +738,7 @@ export default function Home() {
                       <span className="flex items-center gap-1.5 px-2 py-1">
                         <Paperclip className="h-3.5 w-3.5" /> Adjuntar
                       </span>
-                      <span className="flex items-center gap-1.5 px-2 py-1">
+                      <span className="hidden items-center gap-1.5 px-2 py-1 sm:flex">
                         <Mic className="h-3.5 w-3.5" /> Voz
                       </span>
                     </div>
@@ -633,7 +771,7 @@ export default function Home() {
               <div className="mx-auto max-w-3xl">
                 <header className="mb-5 flex items-start gap-3">
                   <span
-                    className={`flex h-11 w-11 items-center justify-center rounded-xl ${
+                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
                       isFree ? "bg-primary/10 text-primary" : chipFor(activeTool.id)
                     }`}
                   >
@@ -649,7 +787,7 @@ export default function Home() {
 
                 {/* Formulario (no para chat libre) */}
                 {!isFree && (
-                  <Card className="space-y-4 p-5">
+                  <Card className="space-y-4 p-4 sm:p-5">
                     {activeTool.fields.filter((f) => f.required).map(renderField)}
 
                     {optionalFields.length > 0 && (
@@ -695,7 +833,7 @@ export default function Home() {
                 )}
 
                 {/* Conversación / resultado */}
-                <Card className={`${isFree ? "" : "mt-4"} p-5`}>
+                <Card className={`${isFree ? "" : "mt-4"} p-4 sm:p-5`}>
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-muted">
                       {isFree ? "Conversación" : "Resultado"}
@@ -773,7 +911,7 @@ export default function Home() {
                         placeholder={
                           isFree && messages.length === 0
                             ? "Escribe tu mensaje…"
-                            : "Responde o pide un ajuste… (p. ej. «usa el nombre de mi marca»)"
+                            : "Responde o pide un ajuste…"
                         }
                         className="max-h-32 resize-none"
                       />
@@ -797,104 +935,17 @@ export default function Home() {
         </ScrollArea>
       </Card>
 
-      {/* ===================== PANEL DERECHO ===================== */}
+      {/* ===================== PANEL DERECHO (escritorio) ===================== */}
       <Card className="hidden w-72 shrink-0 flex-col p-4 xl:flex">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-heading text-sm font-bold text-foreground">
-            Historial{" "}
-            <span className="font-normal text-muted">({conversations.length})</span>
-          </h2>
-          {conversations.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearHistory}
-              className="h-auto px-2 py-1 text-muted hover:text-foreground"
-            >
-              Limpiar
-            </Button>
-          )}
-        </div>
-        {conversations.length === 0 ? (
-          <div className="mt-6 flex flex-col items-center gap-2 px-4 text-center text-muted">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2">
-              <Sparkles className="h-5 w-5 opacity-60" />
-            </div>
-            <p className="text-xs">Tus conversaciones se guardarán aquí.</p>
-          </div>
-        ) : (
-          <>
-            <div className="relative mb-2">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-              <Input
-                value={histQuery}
-                onChange={(e) => setHistQuery(e.target.value)}
-                placeholder="Buscar en el historial"
-                className="bg-surface-2 py-1.5 pl-8 text-xs"
-              />
-            </div>
-            <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
-              <div className="space-y-2">
-                {filteredConvs.length === 0 && (
-                  <p className="px-1 py-6 text-center text-xs text-muted">
-                    Sin resultados
-                  </p>
-                )}
-                {filteredConvs.map((c) => {
-                const last = [...c.messages]
-                  .reverse()
-                  .find((m) => m.role === "assistant");
-                const snippet = (last?.content || "")
-                  .replace(/[#*`>|]/g, "")
-                  .trim()
-                  .slice(0, 70);
-                const active = c.id === currentConvId;
-                return (
-                  <div key={c.id} className="group relative">
-                    <Button
-                      variant="outline"
-                      onClick={() => openConversation(c)}
-                      className={`h-auto w-full flex-col items-start gap-1 rounded-xl bg-surface-2 p-3 pr-8 text-left hover:-translate-y-0.5 ${
-                        active ? "ring-2 ring-ring/40" : ""
-                      }`}
-                    >
-                      <span className="flex w-full items-center gap-2">
-                        <span
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${
-                            c.toolId === FREE_TOOL.id
-                              ? "bg-primary/10 text-primary"
-                              : chipFor(c.toolId)
-                          }`}
-                        >
-                          <ToolIcon
-                            name={getTool(c.toolId)?.icon ?? "Sparkles"}
-                            className="h-3 w-3"
-                          />
-                        </span>
-                        <span className="truncate text-xs font-semibold text-foreground">
-                          {c.title}
-                        </span>
-                      </span>
-                      <span className="line-clamp-2 whitespace-normal text-xs font-normal text-muted">
-                        {snippet}
-                      </span>
-                    </Button>
-                    <button
-                      onClick={() => deleteConversation(c.id)}
-                      title="Eliminar"
-                      aria-label="Eliminar conversación"
-                      className="absolute right-1.5 top-1.5 hidden h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted transition hover:bg-surface hover:text-rose-500 group-hover:flex"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-              </div>
-            </ScrollArea>
-          </>
-        )}
+        {historyBody}
       </Card>
+
+      {/* Cajón de historial (móvil/tablet) */}
+      <Sheet open={histOpen} onOpenChange={setHistOpen}>
+        <SheetContent side="right" title="Historial">
+          {historyBody}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

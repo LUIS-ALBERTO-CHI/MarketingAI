@@ -57,11 +57,19 @@ export async function POST(req: Request) {
         }
         controller.close();
       } catch (err: unknown) {
-        let msg = "Error al contactar con la API de Claude.";
-        if (err instanceof Anthropic.AuthenticationError) {
+        const isAuth =
+          err instanceof Anthropic.AuthenticationError ||
+          (err instanceof Error &&
+            /authentication|api[_-]?key|authtoken|x-api-key/i.test(err.message));
+
+        let msg = "\n\n[Error] Error al contactar con la API de Claude.";
+        if (isAuth) {
           msg =
-            "\n\n[Error de autenticación] No se encontraron credenciales válidas. " +
-            "Configura ANTHROPIC_API_KEY en .env.local o inicia sesión con `ant auth login`.";
+            "\n\n**[Error de autenticación]** No hay credenciales de Claude configuradas.\n\n" +
+            "- **En local:** ejecuta `ant auth login`, o pon `ANTHROPIC_API_KEY` en `.env.local`.\n" +
+            "- **En Vercel u otro hosting:** añade la variable de entorno `ANTHROPIC_API_KEY` " +
+            "en *Settings → Environment Variables* del proyecto y vuelve a desplegar. " +
+            "(El inicio de sesión con `ant` solo funciona en tu equipo local, no en la nube.)";
         } else if (err instanceof Anthropic.APIError) {
           msg = `\n\n[Error de la API ${err.status ?? ""}] ${err.message}`;
         } else if (err instanceof Error) {

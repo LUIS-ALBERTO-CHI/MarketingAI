@@ -59,6 +59,19 @@ https://console.anthropic.com/settings/keys :
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxx
 ```
 
+### Despliegue en Vercel (o cualquier hosting)
+
+**Importante:** el inicio de sesión con `ant` (OAuth) funciona **solo en tu equipo local**.
+En la nube no existe ese comando ni tu sesión, así que **debes** configurar una API key:
+
+1. En Vercel: **Project → Settings → Environment Variables**.
+2. Añade `ANTHROPIC_API_KEY` con tu clave de la API.
+3. Vuelve a desplegar (**Redeploy**).
+
+Sin esa variable, la app mostrará *"Could not resolve authentication method"* porque el
+servidor no tiene con qué autenticarse. (Requiere una API key real; la sesión de `ant`
+no sirve en producción porque es local y de corta duración.)
+
 ## Puesta en marcha
 
 ```bash
