@@ -10,28 +10,31 @@ import {
   Loader2,
   Sun,
   Moon,
-  Settings,
-  HelpCircle,
-  Home as HomeIcon,
   Paperclip,
   Mic,
-  Sparkles,
   RotateCcw,
   X,
   ChevronDown,
   Menu,
-  History,
-  Users,
   FolderPlus,
   Pencil,
   Trash2,
   Check,
 } from "lucide-react";
+import {
+  House,
+  GearSix,
+  Question,
+  ClockCounterClockwise,
+  UsersThree,
+  Sparkle,
+} from "@phosphor-icons/react/dist/ssr";
 import { TOOLS, getTool, FREE_TOOL, systemFor, ACCOUNT_FIELD } from "@/lib/tools";
 import { ToolIcon } from "@/components/Icon";
 import { LogoMark } from "@/components/Logo";
 import { Markdown } from "@/components/Markdown";
-import { Select } from "@/components/ui/Select";
+import { Select, ModelSelect } from "@/components/ui/Select";
+import { MODELS, DEFAULT_MODEL, getModel } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,6 +63,17 @@ import {
   accountHasLinks,
   accountSystemSuffix,
 } from "@/lib/accounts";
+
+// Iconos de navegación/sección (Phosphor), redondeados y minimalistas.
+// Por defecto son de línea; se rellenan ("fill") solo cuando están activos,
+// como en la barra de Facebook. Conservan los nombres previos.
+type NavIconProps = { className?: string; weight?: "regular" | "fill" | "bold" };
+const HomeIcon = (p: NavIconProps) => <House weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
+const Settings = (p: NavIconProps) => <GearSix weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
+const HelpCircle = (p: NavIconProps) => <Question weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
+const History = (p: NavIconProps) => <ClockCounterClockwise weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
+const Users = (p: NavIconProps) => <UsersThree weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
+const Sparkles = (p: NavIconProps) => <Sparkle weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
 
 const CHIPS = [
   "bg-amber-500/10 text-amber-500",
@@ -147,8 +161,11 @@ export default function Home() {
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [attachments, setAttachments] = useState<ImagePart[]>([]);
+  const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedModel = useMemo(() => getModel(modelId), [modelId]);
 
   const tool = useMemo(
     () => (selectedId ? getTool(selectedId) ?? null : null),
@@ -170,6 +187,10 @@ export default function Home() {
 
     setAccounts(loadAccounts());
     setActiveAccountId(loadActiveAccountId());
+    try {
+      const savedModel = localStorage.getItem("modelId");
+      if (savedModel) setModelId(savedModel);
+    } catch {}
 
     const t = params.get("tool");
     if (t && getTool(t)) setSelectedId(t);
@@ -261,6 +282,13 @@ export default function Home() {
     setAttachments((prev) => prev.filter((_, j) => j !== i));
   }
 
+  function chooseModel(id: string) {
+    setModelId(id);
+    try {
+      localStorage.setItem("modelId", id);
+    } catch {}
+  }
+
   // ---------- Cuentas / Proyectos ----------
   function chooseActiveAccount(id: string | null) {
     setActiveAccountId(id);
@@ -346,7 +374,7 @@ export default function Home() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ system, messages: baseMsgs, web }),
+        body: JSON.stringify({ system, messages: baseMsgs, web, model: modelId }),
       });
       if (!res.ok || !res.body) {
         const d = await res.json().catch(() => ({}));
@@ -430,14 +458,22 @@ export default function Home() {
       system += accountSystemSuffix(activeAccount);
       web = true;
     }
+    web = web && selectedModel.web; // las herramientas web solo existen en Claude
 
     runTurn(system, [{ role: "user", content }], t.id, t.name, convId, true, web);
   }
 
   function sendFollowup() {
+    if (loading) return;
     const text = followup.trim();
-    const imgs = attachments;
-    if ((!text && imgs.length === 0) || loading) return;
+    const visionOk = selectedModel.vision;
+    if (attachments.length && !visionOk) {
+      toast.info(
+        "Este modelo no admite imágenes; se envía solo el texto. Cambia a un modelo con visión para analizarlas."
+      );
+    }
+    const imgs = visionOk ? attachments : [];
+    if (!text && imgs.length === 0) return;
     const t = getTool(selectedId ?? FREE_TOOL.id) ?? FREE_TOOL;
     const convId = currentConvId ?? newId();
     if (!currentConvId) setCurrentConvId(convId);
@@ -450,30 +486,35 @@ export default function Home() {
     };
     const base: Msg[] = [...messages.filter((m) => m.content), userMsg];
     setFollowup("");
-    setAttachments([]);
+    if (visionOk) setAttachments([]);
     let system = systemFor(t);
-    let web = false;
     if (accountHasLinks(activeAccount)) {
       system += accountSystemSuffix(activeAccount);
-      web = true;
     }
+    const web = accountHasLinks(activeAccount) && selectedModel.web;
     runTurn(system, base, t.id, t.name, convId, syntheticFirst, web);
   }
 
   function submitHomePrompt() {
+    if (loading) return;
     const p = inputs.prompt?.trim();
-    const imgs = attachments;
-    if ((!p && imgs.length === 0) || loading) return;
+    const visionOk = selectedModel.vision;
+    if (attachments.length && !visionOk) {
+      toast.info(
+        "Este modelo no admite imágenes; se envía solo el texto. Cambia a un modelo con visión para analizarlas."
+      );
+    }
+    const imgs = visionOk ? attachments : [];
+    if (!p && imgs.length === 0) return;
     const convId = newId();
     setSelectedId(FREE_TOOL.id);
     setCurrentConvId(convId);
     setSyntheticFirst(false);
     let system = systemFor(FREE_TOOL);
-    let web = false;
     if (accountHasLinks(activeAccount)) {
       system += accountSystemSuffix(activeAccount);
-      web = true;
     }
+    const web = accountHasLinks(activeAccount) && selectedModel.web;
     const userMsg: Msg = {
       role: "user",
       content:
@@ -481,7 +522,7 @@ export default function Home() {
         "Aquí tienes una imagen de referencia. Analízala y básate en su estilo.",
       ...(imgs.length ? { images: imgs } : {}),
     };
-    setAttachments([]);
+    if (visionOk) setAttachments([]);
     updateField("prompt", "");
     runTurn(
       system,
@@ -578,7 +619,11 @@ export default function Home() {
             selectedId === null ? "text-foreground" : ""
           }`}
         >
-          <HomeIcon className="h-5 w-5" /> Inicio
+          <HomeIcon
+            className="h-5 w-5"
+            weight={selectedId === null ? "fill" : "regular"}
+          />{" "}
+          Inicio
         </Button>
 
         <p className="mb-1 mt-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -602,7 +647,11 @@ export default function Home() {
                     t.id
                   )}`}
                 >
-                  <ToolIcon name={t.icon} className="h-4 w-4" />
+                  <ToolIcon
+                    name={t.icon}
+                    className="h-4 w-4"
+                    weight={active ? "fill" : "regular"}
+                  />
                 </span>
                 <span className="truncate">{t.name}</span>
               </Button>
@@ -619,6 +668,21 @@ export default function Home() {
       <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
         Ajustes
       </p>
+      <div className="mb-2 px-1">
+        <label className="mb-1 block px-2 text-xs font-medium text-muted">
+          Modelo de IA
+        </label>
+        <ModelSelect
+          value={modelId}
+          onValueChange={chooseModel}
+          options={MODELS.map((m) => ({
+            value: m.id,
+            label: m.label,
+            hint: m.hint,
+            free: m.free,
+          }))}
+        />
+      </div>
       <Button variant="ghost" className="h-9 w-full justify-start gap-3 px-3 font-medium">
         <Settings className="h-5 w-5" /> Configuración
       </Button>
@@ -1008,8 +1072,13 @@ export default function Home() {
             </div>
           </div>
           <div className="flex min-w-0 shrink items-center gap-2">
-            <span className="hidden rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted lg:inline-flex">
-              Claude Opus 4.8
+            <span className="hidden items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted lg:inline-flex">
+              {selectedModel.label}
+              {selectedModel.free && (
+                <span className="rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold uppercase text-emerald-600">
+                  Gratis
+                </span>
+              )}
             </span>
             <Button
               variant={activeAccount ? "subtle" : "outline"}
@@ -1144,7 +1213,7 @@ export default function Home() {
                       isFree ? "bg-primary/10 text-primary" : chipFor(activeTool.id)
                     }`}
                   >
-                    <ToolIcon name={activeTool.icon} className="h-5 w-5" />
+                    <ToolIcon name={activeTool.icon} className="h-5 w-5" weight="fill" />
                   </span>
                   <div>
                     <h2 className="font-heading text-xl font-bold text-foreground">
