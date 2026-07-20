@@ -18,9 +18,14 @@ export async function POST(req: Request) {
 
   const { system, messages, web } = body;
 
-  // Herramienta de búsqueda web (server-side) solo cuando se pide analizar una cuenta.
+  // Herramientas web (server-side) solo cuando se pide analizar una cuenta/enlaces.
+  // web_fetch lee el contenido de las URLs presentes en la conversación; web_search
+  // completa el contexto. Ambas incluyen filtrado dinámico en Opus 4.8.
   const tools = web
-    ? [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }]
+    ? [
+        { type: "web_search_20260209", name: "web_search", max_uses: 5 },
+        { type: "web_fetch_20260209", name: "web_fetch", max_uses: 8 },
+      ]
     : undefined;
   const clean = (messages ?? []).filter(
     (m) =>

@@ -21,6 +21,11 @@ import {
   ChevronDown,
   Menu,
   History,
+  Users,
+  FolderPlus,
+  Pencil,
+  Trash2,
+  Check,
 } from "lucide-react";
 import { TOOLS, getTool, FREE_TOOL, systemFor, ACCOUNT_FIELD } from "@/lib/tools";
 import { ToolIcon } from "@/components/Icon";
@@ -46,6 +51,15 @@ import {
 } from "@/components/ui/collapsible";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import type { ToolField } from "@/lib/tools";
+import {
+  type Account,
+  loadAccounts,
+  saveAccounts,
+  loadActiveAccountId,
+  saveActiveAccountId,
+  accountHasLinks,
+  accountSystemSuffix,
+} from "@/lib/accounts";
 
 const CHIPS = [
   "bg-amber-500/10 text-amber-500",
@@ -107,6 +121,10 @@ export default function Home() {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false); // drawer navegación (móvil)
   const [histOpen, setHistOpen] = useState(false); // drawer historial (móvil)
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const tool = useMemo(
@@ -127,9 +145,17 @@ export default function Home() {
       if (raw) setConversations(JSON.parse(raw));
     } catch {}
 
+    setAccounts(loadAccounts());
+    setActiveAccountId(loadActiveAccountId());
+
     const t = params.get("tool");
     if (t && getTool(t)) setSelectedId(t);
   }, []);
+
+  const activeAccount = useMemo(
+    () => accounts.find((a) => a.id === activeAccountId) ?? null,
+    [accounts, activeAccountId]
+  );
 
   function toggleTheme(next: boolean) {
     setDark(next);
@@ -185,6 +211,42 @@ export default function Home() {
   function clearHistory() {
     setConversations([]);
     persist([]);
+  }
+
+  // ---------- Cuentas / Proyectos ----------
+  function chooseActiveAccount(id: string | null) {
+    setActiveAccountId(id);
+    saveActiveAccountId(id);
+  }
+  function saveEditingAccount() {
+    if (!editingAccount) return;
+    const name = editingAccount.name.trim();
+    if (!name) return;
+    const links = editingAccount.links.map((l) => l.trim()).filter(Boolean);
+    const acc: Account = {
+      id: editingAccount.id,
+      name,
+      links,
+      notes: editingAccount.notes?.trim() || undefined,
+    };
+    setAccounts((prev) => {
+      const next = prev.some((a) => a.id === acc.id)
+        ? prev.map((a) => (a.id === acc.id ? acc : a))
+        : [acc, ...prev];
+      saveAccounts(next);
+      return next;
+    });
+    chooseActiveAccount(acc.id);
+    setEditingAccount(null);
+  }
+  function removeAccount(id: string) {
+    setAccounts((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      saveAccounts(next);
+      return next;
+    });
+    if (activeAccountId === id) chooseActiveAccount(null);
+    if (editingAccount?.id === id) setEditingAccount(null);
   }
   function openConversation(conv: Conversation) {
     setSelectedId(conv.toolId);
@@ -304,7 +366,7 @@ export default function Home() {
 
     let content = t.buildPrompt(inputs);
     const acct = inputs.cuenta?.trim();
-    const web = !!(t.webAware && acct);
+    let web = !!(t.webAware && acct);
     if (web) {
       content +=
         `\n\nCUENTA A ANALIZAR: ${acct}\n` +
@@ -312,7 +374,13 @@ export default function Home() {
         `Si no encuentras datos fiables, dilo con claridad y continúa aplicando buenas prácticas del sector.`;
     }
 
-    runTurn(systemFor(t), [{ role: "user", content }], t.id, t.name, convId, true, web);
+    let system = systemFor(t);
+    if (accountHasLinks(activeAccount)) {
+      system += accountSystemSuffix(activeAccount);
+      web = true;
+    }
+
+    runTurn(system, [{ role: "user", content }], t.id, t.name, convId, true, web);
   }
 
   function sendFollowup() {
@@ -326,7 +394,13 @@ export default function Home() {
       { role: "user", content: text },
     ];
     setFollowup("");
-    runTurn(systemFor(t), base, t.id, t.name, convId, syntheticFirst);
+    let system = systemFor(t);
+    let web = false;
+    if (accountHasLinks(activeAccount)) {
+      system += accountSystemSuffix(activeAccount);
+      web = true;
+    }
+    runTurn(system, base, t.id, t.name, convId, syntheticFirst, web);
   }
 
   function submitHomePrompt() {
@@ -336,13 +410,20 @@ export default function Home() {
     setSelectedId(FREE_TOOL.id);
     setCurrentConvId(convId);
     setSyntheticFirst(false);
+    let system = systemFor(FREE_TOOL);
+    let web = false;
+    if (accountHasLinks(activeAccount)) {
+      system += accountSystemSuffix(activeAccount);
+      web = true;
+    }
     runTurn(
-      systemFor(FREE_TOOL),
+      system,
       [{ role: "user", content: p }],
       FREE_TOOL.id,
       FREE_TOOL.name,
       convId,
-      false
+      false,
+      web
     );
   }
 
@@ -613,6 +694,171 @@ export default function Home() {
     </>
   );
 
+  const accountsBody = (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-heading text-sm font-bold text-foreground">
+          Cuentas / Proyectos
+        </h2>
+        {!editingAccount && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setEditingAccount({ id: newId(), name: "", links: [], notes: "" })
+            }
+            className="h-auto gap-1 px-2 py-1 text-primary hover:bg-primary/10 hover:text-primary"
+          >
+            <FolderPlus className="h-4 w-4" /> Nueva
+          </Button>
+        )}
+      </div>
+
+      {editingAccount ? (
+        <div className="space-y-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Nombre</label>
+            <Input
+              value={editingAccount.name}
+              onChange={(e) =>
+                setEditingAccount({ ...editingAccount, name: e.target.value })
+              }
+              placeholder="Ej: Cafetería Aurora"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Enlaces (uno por línea)
+            </label>
+            <Textarea
+              rows={4}
+              value={editingAccount.links.join("\n")}
+              onChange={(e) =>
+                setEditingAccount({
+                  ...editingAccount,
+                  links: e.target.value.split("\n"),
+                })
+              }
+              placeholder={"https://instagram.com/tu_cuenta\nhttps://tuweb.com"}
+            />
+            <p className="text-xs text-muted">
+              Perfiles de redes o web. La IA intentará leerlos para basar el
+              contenido en su estilo. Nota: algunas redes bloquean la lectura
+              automática; una web propia da mejores resultados.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Notas (opcional)
+            </label>
+            <Textarea
+              rows={2}
+              value={editingAccount.notes ?? ""}
+              onChange={(e) =>
+                setEditingAccount({ ...editingAccount, notes: e.target.value })
+              }
+              placeholder="Tono, público, temas a evitar…"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={saveEditingAccount}
+              disabled={!editingAccount.name.trim()}
+              className="flex-1"
+            >
+              <Check className="h-4 w-4" /> Guardar
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditingAccount(null)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      ) : accounts.length === 0 ? (
+        <div className="mt-6 flex flex-col items-center gap-2 px-4 text-center text-muted">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2">
+            <Users className="h-5 w-5 opacity-60" />
+          </div>
+          <p className="text-xs">
+            Crea una cuenta y pega los enlaces de sus redes. La IA los usará como
+            contexto en cada herramienta.
+          </p>
+        </div>
+      ) : (
+        <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
+          <div className="space-y-2">
+            <Button
+              variant={activeAccountId === null ? "subtle" : "ghost"}
+              onClick={() => chooseActiveAccount(null)}
+              className="h-9 w-full justify-start gap-2 px-3 font-medium"
+            >
+              {activeAccountId === null ? (
+                <Check className="h-4 w-4 text-primary" />
+              ) : (
+                <span className="h-4 w-4" />
+              )}
+              Sin cuenta
+            </Button>
+            {accounts.map((a) => {
+              const active = a.id === activeAccountId;
+              return (
+                <div
+                  key={a.id}
+                  className={`rounded-xl border p-3 ${
+                    active
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-border bg-surface-2"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <button
+                      onClick={() => chooseActiveAccount(a.id)}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+                    >
+                      {active ? (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : (
+                        <Users className="h-4 w-4 shrink-0 text-muted" />
+                      )}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-foreground">
+                          {a.name}
+                        </span>
+                        <span className="block truncate text-xs text-muted">
+                          {a.links.length} enlace{a.links.length === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        onClick={() => setEditingAccount(a)}
+                        aria-label="Editar cuenta"
+                        className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted transition hover:bg-surface hover:text-foreground"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => removeAccount(a.id)}
+                        aria-label="Eliminar cuenta"
+                        className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted transition hover:bg-surface hover:text-rose-500"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      )}
+    </>
+  );
+
   return (
     <div className="flex h-screen gap-3 bg-background p-2 sm:p-3">
       {/* ===================== SIDEBAR (escritorio) ===================== */}
@@ -660,16 +906,30 @@ export default function Home() {
               )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted sm:inline-flex">
+          <div className="flex min-w-0 shrink items-center gap-2">
+            <span className="hidden rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted lg:inline-flex">
               Claude Opus 4.8
             </span>
+            <Button
+              variant={activeAccount ? "subtle" : "outline"}
+              size="sm"
+              onClick={() => setAccountsOpen(true)}
+              aria-label="Cuentas y proyectos"
+              className={`min-w-0 max-w-[45vw] gap-1.5 ${
+                activeAccount ? "text-foreground" : "text-muted"
+              }`}
+            >
+              <Users className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                {activeAccount ? activeAccount.name : "Cuentas"}
+              </span>
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={() => setHistOpen(true)}
               aria-label="Abrir historial"
-              className="xl:hidden"
+              className="shrink-0 xl:hidden"
             >
               <History className="h-5 w-5" />
             </Button>
@@ -955,6 +1215,19 @@ export default function Home() {
       <Sheet open={histOpen} onOpenChange={setHistOpen}>
         <SheetContent side="right" title="Historial">
           {historyBody}
+        </SheetContent>
+      </Sheet>
+
+      {/* Cajón de cuentas / proyectos */}
+      <Sheet
+        open={accountsOpen}
+        onOpenChange={(o) => {
+          setAccountsOpen(o);
+          if (!o) setEditingAccount(null);
+        }}
+      >
+        <SheetContent side="right" title="Cuentas y proyectos">
+          {accountsBody}
         </SheetContent>
       </Sheet>
     </div>
