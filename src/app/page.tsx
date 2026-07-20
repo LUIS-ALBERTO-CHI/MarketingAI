@@ -697,7 +697,7 @@ export default function Home() {
                       key={t.id}
                       variant="outline"
                       onClick={() => openTool(t.id)}
-                      className="group h-auto w-full justify-start gap-3 rounded-2xl p-4 text-left shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card"
+                      className="group h-auto w-full min-w-0 justify-start gap-3 rounded-2xl p-4 text-left shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card"
                     >
                       <span
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${chipFor(
