@@ -254,6 +254,90 @@ export const TOOLS: Tool[] = [
       `4) 3-5 recomendaciones accionables y priorizadas para diferenciarte.\n` +
       `Marca claramente cualquier suposición; no inventes cifras o precios exactos.`,
   },
+  {
+    id: "design",
+    name: "Diseño & Dirección de Arte",
+    tagline: "Conceptos y prompts para diseños que no parecen hechos por IA",
+    icon: "Palette",
+    system:
+      "Eres director de arte y diseñador gráfico sénior de una agencia premium. Traduces una marca en una dirección visual concreta y accionable: paleta (con códigos HEX), tipografías reales, composición, jerarquía y estética. Cuando generas prompts para herramientas de imagen, los escribes en inglés, específicos, con estilo, encuadre, iluminación y parámetros. Tu obsesión es que el resultado se vea profesional y HUMANO, nunca con el aspecto genérico de 'IA': evitas tipografías cliché (Inter, Roboto, Arial, fuentes de sistema), degradados morados sobre blanco/negro, composiciones simétricas y predecibles, brillos de plástico y el look de banco de imágenes. Buscas carácter, intención, imperfección deliberada y coherencia de marca.",
+    fields: [
+      {
+        name: "pieza",
+        label: "Tipo de diseño",
+        type: "select",
+        options: [
+          "Post para redes",
+          "Historia / Story",
+          "Flyer / Cartel",
+          "Portada / Banner",
+          "Miniatura de video",
+          "Concepto de logo",
+          "Diapositiva / Presentación",
+          "Empaque / Packaging",
+        ],
+        required: true,
+      },
+      {
+        name: "marca",
+        label: "Marca / tema",
+        type: "text",
+        placeholder: "Ej: cafetería de especialidad 'Aurora'",
+        required: true,
+      },
+      {
+        name: "estetica",
+        label: "Estética",
+        type: "select",
+        options: [
+          "Minimalista premium",
+          "Elegante / lujo",
+          "Moderno y fresco",
+          "Editorial",
+          "Retro / vintage",
+          "Orgánico / natural",
+          "Corporativo",
+          "Divertido y colorido",
+        ],
+      },
+      {
+        name: "colores",
+        label: "Colores de marca (opcional)",
+        type: "text",
+        placeholder: "HEX o descripción; o deja que la IA proponga",
+      },
+      {
+        name: "generador",
+        label: "¿Para qué generador de imágenes?",
+        type: "select",
+        options: [
+          "Midjourney",
+          "DALL·E / ChatGPT",
+          "Ideogram (bueno con texto)",
+          "Genérico / cualquiera",
+        ],
+      },
+      {
+        name: "extra",
+        label: "Mensaje, elementos y público",
+        type: "textarea",
+        rows: 3,
+        placeholder:
+          "Qué debe comunicar, texto que va en la pieza, público objetivo, elementos obligatorios…",
+      },
+    ],
+    buildPrompt: (v) =>
+      `Crea la dirección de arte para: "${v.marca}".\n` +
+      `Pieza: ${v.pieza}. Estética: ${v.estetica || "minimalista premium"}.\n` +
+      (v.colores ? `Colores de marca: ${v.colores}.\n` : "Propón una paleta adecuada.\n") +
+      (v.extra ? `Contexto: ${v.extra}\n` : "") +
+      `\nEntrega en este orden, en formato claro y escaneable:\n` +
+      `1) **Concepto** (2-3 líneas): la idea visual y qué sensación transmite.\n` +
+      `2) **Sistema visual**: paleta con códigos HEX (indicando para qué usar cada color), 1-2 tipografías reales con su rol (título / cuerpo), estilo de imagen o ilustración, tratamiento (formas, texturas, sombras, espaciado) y una descripción del layout y la jerarquía para un(a) ${v.pieza}.\n` +
+      `3) **Prompts listos** para ${v.generador || "cualquier generador"}: 2-3 variantes en inglés, específicas (sujeto, estilo, encuadre, iluminación, color) y con parámetros cuando apliquen. Si la pieza lleva texto, sepáralo para editarlo después (los generadores fallan con texto).\n` +
+      `4) **Para que NO parezca IA**: 4-5 recomendaciones concretas para esta pieza —qué evitar y cómo lograr un acabado humano, profesional y con carácter de marca.\n` +
+      `Marca cualquier suposición. No uses tipografías cliché ni degradados morados genéricos.`,
+  },
 ];
 
 // Herramientas que pueden analizar una cuenta con búsqueda web.
@@ -265,6 +349,7 @@ const WEB_AWARE = new Set([
   "ads",
   "calendar",
   "video-script",
+  "design",
 ]);
 for (const t of TOOLS) if (WEB_AWARE.has(t.id)) t.webAware = true;
 

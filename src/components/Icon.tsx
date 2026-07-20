@@ -12,6 +12,7 @@ import {
   MagicWand,
   FilmSlate,
   TrendUp,
+  Palette,
   Sparkle,
 } from "@phosphor-icons/react/dist/ssr";
 
@@ -34,6 +35,7 @@ const ICONS: Record<string, IconCmp> = {
   Wand2: MagicWand,
   Clapperboard: FilmSlate,
   TrendingUp: TrendUp,
+  Palette,
 };
 
 // Por defecto los iconos son de línea (outline). El relleno ("fill") se reserva
