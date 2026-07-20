@@ -13,6 +13,8 @@ import {
   FilmSlate,
   TrendUp,
   Palette,
+  Table,
+  ImageSquare,
   Sparkle,
 } from "@phosphor-icons/react/dist/ssr";
 
@@ -36,6 +38,8 @@ const ICONS: Record<string, IconCmp> = {
   Clapperboard: FilmSlate,
   TrendingUp: TrendUp,
   Palette,
+  Table,
+  PostImage: ImageSquare,
 };
 
 // Por defecto los iconos son de línea (outline). El relleno ("fill") se reserva

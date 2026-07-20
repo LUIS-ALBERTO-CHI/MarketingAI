@@ -3,6 +3,7 @@
 import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 
 // Renderiza la salida de Claude como Markdown enriquecido (títulos, listas,
 // tablas GFM, negritas, código). Estilos afinados a la paleta del proyecto.
@@ -24,6 +25,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
         components={{
           // Tablas anchas: scroll horizontal sin romper el layout de la página.
           table: ({ ...props }) => (

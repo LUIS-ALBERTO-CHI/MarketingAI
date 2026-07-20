@@ -260,7 +260,8 @@ export const TOOLS: Tool[] = [
     tagline: "Conceptos y prompts para diseños que no parecen hechos por IA",
     icon: "Palette",
     system:
-      "Eres director de arte y diseñador gráfico sénior de una agencia premium. Traduces una marca en una dirección visual concreta y accionable: paleta (con códigos HEX), tipografías reales, composición, jerarquía y estética. Cuando generas prompts para herramientas de imagen, los escribes en inglés, específicos, con estilo, encuadre, iluminación y parámetros. Tu obsesión es que el resultado se vea profesional y HUMANO, nunca con el aspecto genérico de 'IA': evitas tipografías cliché (Inter, Roboto, Arial, fuentes de sistema), degradados morados sobre blanco/negro, composiciones simétricas y predecibles, brillos de plástico y el look de banco de imágenes. Buscas carácter, intención, imperfección deliberada y coherencia de marca.",
+      "Eres director de arte y diseñador gráfico sénior de una agencia premium. Traduces una marca en una dirección visual concreta y accionable: paleta (con códigos HEX), tipografías reales, composición, jerarquía y estética. Generas prompts de imagen en inglés, específicos, con sujeto, estilo, encuadre, iluminación y color. Tu obsesión es que el resultado se vea profesional y HUMANO, nunca con el aspecto genérico de 'IA': evitas tipografías cliché (Inter, Roboto, Arial, fuentes de sistema), degradados morados sobre blanco/negro, composiciones simétricas y predecibles, brillos de plástico y el look de banco de imágenes. Buscas carácter, intención, imperfección deliberada y coherencia de marca. " +
+      "IMPORTANTE: la aplicación genera imágenes automáticamente a partir de los prompts que marques con [[IMG]]. Cada prompt de imagen debe ir en su PROPIA línea, empezando EXACTAMENTE con `[[IMG]] ` seguido del prompt en inglés y nada más en esa línea. Sin viñetas, sin comillas, sin numeración y sin bloque de código en esas líneas. Los prompts describen una imagen fotográfica o ilustrada SIN texto ni logotipos embebidos (los generadores fallan con texto).",
     fields: [
       {
         name: "pieza",
@@ -334,9 +335,127 @@ export const TOOLS: Tool[] = [
       `\nEntrega en este orden, en formato claro y escaneable:\n` +
       `1) **Concepto** (2-3 líneas): la idea visual y qué sensación transmite.\n` +
       `2) **Sistema visual**: paleta con códigos HEX (indicando para qué usar cada color), 1-2 tipografías reales con su rol (título / cuerpo), estilo de imagen o ilustración, tratamiento (formas, texturas, sombras, espaciado) y una descripción del layout y la jerarquía para un(a) ${v.pieza}.\n` +
-      `3) **Prompts listos** para ${v.generador || "cualquier generador"}: 2-3 variantes en inglés, específicas (sujeto, estilo, encuadre, iluminación, color) y con parámetros cuando apliquen. Si la pieza lleva texto, sepáralo para editarlo después (los generadores fallan con texto).\n` +
-      `4) **Para que NO parezca IA**: 4-5 recomendaciones concretas para esta pieza —qué evitar y cómo lograr un acabado humano, profesional y con carácter de marca.\n` +
+      `3) **Para que NO parezca IA**: 4-5 recomendaciones concretas para esta pieza —qué evitar y cómo lograr un acabado humano, profesional y con carácter de marca. Si vas a poner texto en la pieza (título, precio), hazlo tú después en un editor; no lo metas en el prompt.\n` +
+      `\nAl FINAL de todo, sin ningún encabezado, escribe exactamente 2 líneas sueltas que empiecen con \`[[IMG]] \` seguidas de un prompt en inglés (sujeto, estilo, encuadre, iluminación, color; SIN texto ni logotipos embebidos). La app las convierte en imágenes reales, así que no las numeres ni las pongas en viñetas ni en bloque de código.\n` +
       `Marca cualquier suposición. No uses tipografías cliché ni degradados morados genéricos.`,
+  },
+  {
+    id: "content-table",
+    name: "Ideas de Posts (Tema · Copy · Inspo)",
+    tagline: "Pasa un tema y recibe una tabla lista: gancho, copy e inspiración",
+    icon: "Table",
+    system:
+      "Eres estratega de contenido y copywriter sénior. A partir de un tema o idea, produces una tabla lista para trabajar con 3 columnas: Tema (título/gancho), Copy (texto completo listo para publicar) e Inspo (referencia visual). Escribes en español de México, con copy persuasivo, estructura clara (gancho, beneficios, CTA) y emojis usados con criterio. Devuelves siempre una tabla Markdown válida.",
+    fields: [
+      {
+        name: "tema",
+        label: "Tema o idea",
+        type: "textarea",
+        rows: 3,
+        placeholder:
+          "Ej: convocatoria de inscripciones para la carrera de enfermería con promo de descuento",
+        required: true,
+      },
+      {
+        name: "cantidad",
+        label: "Cuántas ideas",
+        type: "select",
+        options: ["3", "5", "8"],
+      },
+      { name: "red", label: "Red social", type: "select", options: REDES },
+      {
+        name: "negocio",
+        label: "Negocio / marca (opcional)",
+        type: "text",
+        placeholder: "Ej: IMEI — escuela de enfermería",
+      },
+      {
+        name: "datos",
+        label: "Datos a incluir (opcional)",
+        type: "textarea",
+        rows: 2,
+        placeholder:
+          "Dirección, WhatsApp/enlace, promoción, fechas, público objetivo…",
+      },
+    ],
+    buildPrompt: (v) =>
+      `Genera ${v.cantidad || "5"} ideas de publicación sobre: "${v.tema}".\n` +
+      (v.red ? `Red social: ${v.red}.\n` : "") +
+      (v.negocio ? `Negocio/marca: ${v.negocio}.\n` : "") +
+      (v.datos ? `Datos a incluir cuando aplique: ${v.datos}\n` : "") +
+      `\nDevuelve EXCLUSIVAMENTE una tabla en Markdown (GFM) con EXACTAMENTE estas 3 columnas: Tema | Copy | Inspo. Una fila por idea. Reglas de formato estrictas:\n` +
+      `- Usa la etiqueta <br> para TODOS los saltos de línea dentro de las celdas (nunca saltos reales ni viñetas con guion, que rompen la tabla). NUNCA uses el carácter | dentro de una celda.\n` +
+      `- **Tema**: un título corto en MAYÚSCULAS y, debajo (con <br>), 2-4 líneas con el ángulo o gancho; si aplica una acción pendiente, anótala como "AGREGAR PROMO %".\n` +
+      `- **Copy**: el texto COMPLETO listo para publicar, con gancho, cuerpo, beneficios (usa ✅), una llamada a la acción clara y —cuando haya datos— dirección con 📍 y contacto con 📲. Saltos con <br>. En español de México.\n` +
+      `- **Inspo**: un enlace de BÚSQUEDA de Pinterest para inspiración visual, en formato [ver inspiración](https://www.pinterest.com/search/pins/?q=TERMINOS) con TERMINOS en inglés separados por %20. No inventes enlaces a pines concretos; usa la búsqueda.\n` +
+      `No escribas nada antes ni después de la tabla y no la envuelvas en bloque de código.`,
+  },
+  {
+    id: "post-image",
+    name: "Post con imagen",
+    tagline: "Genera una publicación diseñada (texto perfecto) lista para descargar",
+    icon: "PostImage",
+    system:
+      "Eres director de arte. A partir de un tema, defines el CONTENIDO ESTRUCTURADO de una publicación para redes que la app renderiza como imagen (el texto se dibuja en HTML, así que sale nítido). Eliges una paleta coherente y profesional, y un fondo (foto/ilustración) que combine con la marca, sin texto embebido. El texto visible va en español de México, breve y con gancho.",
+    fields: [
+      {
+        name: "tema",
+        label: "Tema o idea del post",
+        type: "textarea",
+        rows: 2,
+        placeholder: "Ej: promo de vacunación y desparasitación para mascotas",
+        required: true,
+      },
+      {
+        name: "negocio",
+        label: "Marca / negocio",
+        type: "text",
+        placeholder: "Ej: Veterinaria Godínez",
+      },
+      {
+        name: "contacto",
+        label: "Contacto a mostrar (opcional)",
+        type: "text",
+        placeholder: "Ej: 📲 999 105 3995 · 📍 Centro, Mérida",
+      },
+      {
+        name: "estetica",
+        label: "Estética",
+        type: "select",
+        options: [
+          "Moderno oscuro",
+          "Minimalista premium",
+          "Elegante / lujo",
+          "Fresco y colorido",
+          "Corporativo",
+        ],
+      },
+      {
+        name: "colores",
+        label: "Colores de marca (opcional)",
+        type: "text",
+        placeholder: "HEX o descripción; o deja que la IA proponga",
+      },
+    ],
+    buildPrompt: (v) =>
+      `Diseña una publicación sobre: "${v.tema}".\n` +
+      (v.negocio ? `Marca: ${v.negocio}.\n` : "") +
+      (v.contacto ? `Contacto a mostrar: ${v.contacto}.\n` : "") +
+      `Estética: ${v.estetica || "moderno oscuro"}.` +
+      (v.colores ? ` Colores: ${v.colores}.` : " Propón una paleta coherente.") +
+      `\n\nEscribe 1 línea de introducción y, al FINAL, un ÚNICO bloque \`\`\`json con exactamente esta forma (sin comentarios):\n` +
+      `{\n` +
+      `  "brand": "nombre de la marca en mayúsculas o vacío",\n` +
+      `  "headline": "titular corto y potente (máx ~6 palabras)",\n` +
+      `  "subhead": "1 línea de apoyo (opcional)",\n` +
+      `  "bullets": ["beneficio 1", "beneficio 2", "beneficio 3"],\n` +
+      `  "cta": "llamada a la acción corta (ej. Agenda hoy)",\n` +
+      `  "contact": "línea de contacto con emojis o vacío",\n` +
+      `  "palette": { "bg": "#RRGGBB oscuro", "accent": "#RRGGBB vivo", "text": "#RRGGBB claro" },\n` +
+      `  "bgPrompt": "prompt en inglés para el fondo (foto o textura acorde al tema, SIN texto ni logos)",\n` +
+      `  "ratio": "4:5"\n` +
+      `}\n` +
+      `Reglas: texto visible en español de México, breve; paleta con buen contraste (bg oscuro, text claro, accent vivo); 3-4 bullets como máximo; el bgPrompt en inglés y sin texto. Devuelve solo la introducción y el bloque json.`,
   },
 ];
 
@@ -350,6 +469,7 @@ const WEB_AWARE = new Set([
   "calendar",
   "video-script",
   "design",
+  "content-table",
 ]);
 for (const t of TOOLS) if (WEB_AWARE.has(t.id)) t.webAware = true;
 

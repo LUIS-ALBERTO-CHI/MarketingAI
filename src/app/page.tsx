@@ -33,6 +33,11 @@ import { TOOLS, getTool, FREE_TOOL, systemFor, ACCOUNT_FIELD } from "@/lib/tools
 import { ToolIcon } from "@/components/Icon";
 import { LogoMark } from "@/components/Logo";
 import { Markdown } from "@/components/Markdown";
+import {
+  extractImagePrompts,
+  GeneratedImages,
+} from "@/components/GeneratedImages";
+import { extractPostSpec, PostImage } from "@/components/PostImage";
 import { Select, ModelSelect } from "@/components/ui/Select";
 import { MODELS, DEFAULT_MODEL, getModel } from "@/lib/models";
 import { Button } from "@/components/ui/button";
@@ -74,6 +79,23 @@ const HelpCircle = (p: NavIconProps) => <Question weight={p.weight ?? "regular"}
 const History = (p: NavIconProps) => <ClockCounterClockwise weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
 const Users = (p: NavIconProps) => <UsersThree weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
 const Sparkles = (p: NavIconProps) => <Sparkle weight={p.weight ?? "regular"} className={p.className} aria-hidden="true" />;
+
+// Mensaje del asistente: Markdown + imágenes generadas a partir de los prompts
+// marcados con [[IMG]] (p. ej. en la herramienta de Diseño).
+function AssistantMessage({ content }: { content: string }) {
+  const { body: b1, prompts } = extractImagePrompts(content);
+  const { body, spec } = extractPostSpec(b1);
+  return (
+    <>
+      <Markdown>{body}</Markdown>
+      {spec ? (
+        <PostImage spec={spec} />
+      ) : (
+        <GeneratedImages prompts={prompts} />
+      )}
+    </>
+  );
+}
 
 const CHIPS = [
   "bg-amber-500/10 text-amber-500",
@@ -162,6 +184,10 @@ export default function Home() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [attachments, setAttachments] = useState<ImagePart[]>([]);
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
+  const [isMac, setIsMac] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteIndex, setPaletteIndex] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -200,6 +226,28 @@ export default function Home() {
     () => accounts.find((a) => a.id === activeAccountId) ?? null,
     [accounts, activeAccountId]
   );
+
+  // Atajo de teclado (⌘K / Ctrl+K / Alt+K) para abrir el buscador de comandos.
+  useEffect(() => {
+    const mac = /Mac|iPhone|iPad|iPod/.test(
+      navigator.platform || navigator.userAgent
+    );
+    setIsMac(mac);
+
+    function onKey(e: KeyboardEvent) {
+      if (
+        (e.key === "k" || e.key === "K") &&
+        (e.metaKey || e.ctrlKey || e.altKey)
+      ) {
+        e.preventDefault();
+        setPaletteQuery("");
+        setPaletteIndex(0);
+        setPaletteOpen((o) => !o);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function toggleTheme(next: boolean) {
     setDark(next);
@@ -287,6 +335,40 @@ export default function Home() {
     try {
       localStorage.setItem("modelId", id);
     } catch {}
+  }
+
+  // ---------- Buscador de comandos (⌘K / Alt+K) ----------
+  function openPalette() {
+    setPaletteQuery("");
+    setPaletteIndex(0);
+    setPaletteOpen(true);
+  }
+  const paletteResults = TOOLS.filter((t) => {
+    const q = paletteQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      t.name.toLowerCase().includes(q) || t.tagline.toLowerCase().includes(q)
+    );
+  });
+  function runPaletteItem(id: string) {
+    openTool(id);
+    setPaletteOpen(false);
+  }
+  function onPaletteKey(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setPaletteIndex((i) => Math.min(i + 1, paletteResults.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setPaletteIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const t = paletteResults[paletteIndex];
+      if (t) runPaletteItem(t.id);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setPaletteOpen(false);
+    }
   }
 
   // ---------- Cuentas / Proyectos ----------
@@ -601,14 +683,12 @@ export default function Home() {
       <div className="relative mb-3">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
         <Input
+          data-search-tool="true"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar herramienta"
-          className="bg-surface-2 py-2 pl-9 pr-9"
+          placeholder="Filtrar herramientas"
+          className="bg-surface-2 py-2 pl-9 pr-3"
         />
-        <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted">
-          ⌘K
-        </kbd>
       </div>
 
       <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
@@ -1072,6 +1152,19 @@ export default function Home() {
             </div>
           </div>
           <div className="flex min-w-0 shrink items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openPalette}
+              aria-label="Buscar"
+              className="shrink-0 gap-1.5 text-muted"
+            >
+              <Search className="h-4 w-4" />
+              <span className="hidden md:inline">Buscar</span>
+              <kbd className="hidden rounded border border-border bg-surface px-1 text-[10px] font-medium lg:inline">
+                {isMac ? "⌘K" : "Alt K"}
+              </kbd>
+            </Button>
             <span className="hidden items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted lg:inline-flex">
               {selectedModel.label}
               {selectedModel.free && (
@@ -1336,11 +1429,11 @@ export default function Home() {
                             <div key={i}>
                               {streaming ? (
                                 <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-                                  {m.content}
+                                  {extractPostSpec(extractImagePrompts(m.content).body).body}
                                   <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary align-middle" />
                                 </div>
                               ) : (
-                                <Markdown>{m.content}</Markdown>
+                                <AssistantMessage content={m.content} />
                               )}
                             </div>
                           );
@@ -1439,6 +1532,97 @@ export default function Home() {
           {accountsBody}
         </SheetContent>
       </Sheet>
+
+      {/* ===================== BUSCADOR DE COMANDOS (⌘K / Alt+K) ===================== */}
+      {paletteOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-start justify-center bg-black/50 p-4 pt-[12vh] backdrop-blur-sm data-[state=open]:animate-in"
+          onClick={() => setPaletteOpen(false)}
+        >
+          <div
+            className="w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-surface shadow-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative border-b border-border">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input
+                autoFocus
+                value={paletteQuery}
+                onChange={(e) => {
+                  setPaletteQuery(e.target.value);
+                  setPaletteIndex(0);
+                }}
+                onKeyDown={onPaletteKey}
+                placeholder="Buscar herramienta…"
+                className="w-full bg-transparent py-4 pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted"
+              />
+            </div>
+
+            <div className="max-h-[52vh] overflow-y-auto p-1.5">
+              {paletteResults.length === 0 ? (
+                <p className="px-3 py-8 text-center text-sm text-muted">
+                  Sin resultados para “{paletteQuery}”
+                </p>
+              ) : (
+                paletteResults.map((t, i) => {
+                  const sel = i === paletteIndex;
+                  return (
+                    <button
+                      key={t.id}
+                      onMouseMove={() => setPaletteIndex(i)}
+                      onClick={() => runPaletteItem(t.id)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                        sel ? "bg-surface-2" : ""
+                      }`}
+                    >
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${chipFor(
+                          t.id
+                        )}`}
+                      >
+                        <ToolIcon
+                          name={t.icon}
+                          className="h-4 w-4"
+                          weight={sel ? "fill" : "regular"}
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-foreground">
+                          {t.name}
+                        </span>
+                        <span className="block truncate text-xs text-muted">
+                          {t.tagline}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex items-center justify-center gap-4 border-t border-border px-4 py-2.5 text-[11px] text-muted">
+              <span className="flex items-center gap-1">
+                <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5">
+                  Enter
+                </kbd>{" "}
+                abrir
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5">
+                  ↑↓
+                </kbd>{" "}
+                elegir
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5">
+                  esc
+                </kbd>{" "}
+                cerrar
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
