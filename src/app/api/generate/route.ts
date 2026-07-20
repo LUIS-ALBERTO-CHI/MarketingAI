@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 
 const MODEL = process.env.MARKETING_AI_MODEL || "claude-opus-4-8";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type ImgPart = { mediaType: string; data: string };
+type Msg = { role: "user" | "assistant"; content: string; images?: ImgPart[] };
 
 export async function POST(req: Request) {
   let body: { system?: string; messages?: Msg[]; web?: boolean };
@@ -31,12 +32,26 @@ export async function POST(req: Request) {
     (m) =>
       (m.role === "user" || m.role === "assistant") &&
       typeof m.content === "string" &&
-      m.content.trim().length > 0
+      (m.content.trim().length > 0 ||
+        (m.role === "user" && Array.isArray(m.images) && m.images.length > 0))
   );
 
   if (clean.length === 0) {
     return Response.json({ error: "No hay mensajes que enviar." }, { status: 400 });
   }
+
+  // Los mensajes de usuario con imágenes se convierten a bloques de visión.
+  const apiMessages = clean.map((m) => {
+    if (m.role === "user" && m.images?.length) {
+      const blocks: unknown[] = m.images.map((img) => ({
+        type: "image",
+        source: { type: "base64", media_type: img.mediaType, data: img.data },
+      }));
+      if (m.content.trim()) blocks.push({ type: "text", text: m.content });
+      return { role: "user", content: blocks };
+    }
+    return { role: m.role, content: m.content };
+  });
 
   const encoder = new TextEncoder();
 
@@ -49,7 +64,7 @@ export async function POST(req: Request) {
           max_tokens: 4096,
           ...(system ? { system } : {}),
           ...(tools ? { tools: tools as never } : {}),
-          messages: clean,
+          messages: apiMessages as never,
         });
 
         for await (const event of claudeStream) {

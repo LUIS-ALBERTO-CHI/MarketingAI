@@ -78,7 +78,28 @@ const chipFor = (id: string) => {
   return CHIPS[(i < 0 ? 0 : i) % CHIPS.length];
 };
 
-type Msg = { role: "user" | "assistant"; content: string };
+type ImagePart = { mediaType: string; data: string };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  images?: ImagePart[];
+};
+
+const ACCEPTED_IMG = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+function fileToImagePart(file: File): Promise<ImagePart> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string; // data:image/png;base64,....
+      const comma = result.indexOf(",");
+      const mediaType = result.slice(5, result.indexOf(";"));
+      resolve({ mediaType, data: result.slice(comma + 1) });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 interface Conversation {
   id: string;
@@ -125,7 +146,9 @@ export default function Home() {
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [attachments, setAttachments] = useState<ImagePart[]>([]);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tool = useMemo(
     () => (selectedId ? getTool(selectedId) ?? null : null),
@@ -211,6 +234,31 @@ export default function Home() {
   function clearHistory() {
     setConversations([]);
     persist([]);
+  }
+
+  // ---------- Imágenes de referencia (visión) ----------
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const parts: ImagePart[] = [];
+    for (const f of Array.from(files)) {
+      if (!ACCEPTED_IMG.includes(f.type)) {
+        toast.error(`Formato no soportado: ${f.name} (usa JPG, PNG, GIF o WebP)`);
+        continue;
+      }
+      if (f.size > 5 * 1024 * 1024) {
+        toast.error(`Imagen muy grande (máx. 5 MB): ${f.name}`);
+        continue;
+      }
+      try {
+        parts.push(await fileToImagePart(f));
+      } catch {
+        toast.error(`No se pudo leer: ${f.name}`);
+      }
+    }
+    if (parts.length) setAttachments((prev) => [...prev, ...parts].slice(0, 6));
+  }
+  function removeAttachment(i: number) {
+    setAttachments((prev) => prev.filter((_, j) => j !== i));
   }
 
   // ---------- Cuentas / Proyectos ----------
@@ -332,14 +380,17 @@ export default function Home() {
         const finalMsgs: Msg[] = [...baseMsgs, { role: "assistant", content: acc }];
         const firstUser = baseMsgs.find((m) => m.role === "user");
         const title =
-          synthetic || !firstUser ? toolName : firstUser.content.slice(0, 48);
+          synthetic || !firstUser?.content.trim()
+            ? toolName
+            : firstUser.content.slice(0, 48);
         upsertConversation({
           id: convId,
           toolId,
           toolName,
           title,
           syntheticFirst: synthetic,
-          messages: finalMsgs,
+          // No persistimos las imágenes (base64) para no agotar el localStorage.
+          messages: finalMsgs.map((m) => ({ role: m.role, content: m.content })),
         });
       }
     } catch (err) {
@@ -385,15 +436,21 @@ export default function Home() {
 
   function sendFollowup() {
     const text = followup.trim();
-    if (!text || loading) return;
+    const imgs = attachments;
+    if ((!text && imgs.length === 0) || loading) return;
     const t = getTool(selectedId ?? FREE_TOOL.id) ?? FREE_TOOL;
     const convId = currentConvId ?? newId();
     if (!currentConvId) setCurrentConvId(convId);
-    const base: Msg[] = [
-      ...messages.filter((m) => m.content),
-      { role: "user", content: text },
-    ];
+    const userMsg: Msg = {
+      role: "user",
+      content:
+        text ||
+        "Aquí tienes una imagen de referencia. Analízala y básate en su estilo.",
+      ...(imgs.length ? { images: imgs } : {}),
+    };
+    const base: Msg[] = [...messages.filter((m) => m.content), userMsg];
     setFollowup("");
+    setAttachments([]);
     let system = systemFor(t);
     let web = false;
     if (accountHasLinks(activeAccount)) {
@@ -405,7 +462,8 @@ export default function Home() {
 
   function submitHomePrompt() {
     const p = inputs.prompt?.trim();
-    if (!p || loading) return;
+    const imgs = attachments;
+    if ((!p && imgs.length === 0) || loading) return;
     const convId = newId();
     setSelectedId(FREE_TOOL.id);
     setCurrentConvId(convId);
@@ -416,9 +474,18 @@ export default function Home() {
       system += accountSystemSuffix(activeAccount);
       web = true;
     }
+    const userMsg: Msg = {
+      role: "user",
+      content:
+        p ||
+        "Aquí tienes una imagen de referencia. Analízala y básate en su estilo.",
+      ...(imgs.length ? { images: imgs } : {}),
+    };
+    setAttachments([]);
+    updateField("prompt", "");
     runTurn(
       system,
-      [{ role: "user", content: p }],
+      [userMsg],
       FREE_TOOL.id,
       FREE_TOOL.name,
       convId,
@@ -859,8 +926,42 @@ export default function Home() {
     </>
   );
 
+  const attachmentStrip =
+    attachments.length > 0 ? (
+      <div className="flex flex-wrap gap-2 px-1 pt-1">
+        {attachments.map((img, i) => (
+          <div key={i} className="relative">
+            <img
+              src={`data:${img.mediaType};base64,${img.data}`}
+              alt="Adjunto"
+              className="h-14 w-14 rounded-lg border border-border object-cover"
+            />
+            <button
+              onClick={() => removeAttachment(i)}
+              aria-label="Quitar imagen"
+              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-border bg-surface text-muted shadow-soft transition hover:text-rose-500"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+    ) : null;
+
   return (
     <div className="flex h-screen gap-3 bg-background p-2 sm:p-3">
+      {/* Input de archivos oculto, reutilizado por los cuadros de escritura */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
       {/* ===================== SIDEBAR (escritorio) ===================== */}
       <Card className="hidden w-64 shrink-0 flex-col p-4 lg:flex">
         {sidebarBody}
@@ -993,11 +1094,15 @@ export default function Home() {
                     placeholder="Describe lo que quieres crear…"
                     className="max-h-40 resize-none border-0 bg-transparent focus:ring-0"
                   />
+                  {attachmentStrip}
                   <div className="flex items-center justify-between px-1 pb-1">
                     <div className="flex items-center gap-1 text-xs text-muted">
-                      <span className="flex items-center gap-1.5 px-2 py-1">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-surface-2 hover:text-foreground"
+                      >
                         <Paperclip className="h-3.5 w-3.5" /> Adjuntar
-                      </span>
+                      </button>
                       <span className="hidden items-center gap-1.5 px-2 py-1 sm:flex">
                         <Mic className="h-3.5 w-3.5" /> Voz
                       </span>
@@ -1011,7 +1116,11 @@ export default function Home() {
                           <Button
                             size="icon-sm"
                             onClick={submitHomePrompt}
-                            disabled={!inputs.prompt?.trim() || loading}
+                            disabled={
+                              (!inputs.prompt?.trim() &&
+                                attachments.length === 0) ||
+                              loading
+                            }
                           >
                             {loading ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1128,9 +1237,25 @@ export default function Home() {
                             return (
                               <div
                                 key={i}
-                                className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-primary/10 px-3.5 py-2 text-sm text-foreground"
+                                className="ml-auto flex max-w-[85%] flex-col items-end gap-1.5"
                               >
-                                {m.content}
+                                {m.images && m.images.length > 0 && (
+                                  <div className="flex flex-wrap justify-end gap-1.5">
+                                    {m.images.map((img, k) => (
+                                      <img
+                                        key={k}
+                                        src={`data:${img.mediaType};base64,${img.data}`}
+                                        alt="Imagen de referencia"
+                                        className="max-h-44 max-w-full rounded-xl border border-border object-cover"
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                                {m.content && (
+                                  <div className="rounded-2xl rounded-br-sm bg-primary/10 px-3.5 py-2 text-sm text-foreground">
+                                    {m.content}
+                                  </div>
+                                )}
                               </div>
                             );
                           }
@@ -1168,35 +1293,50 @@ export default function Home() {
 
                   {/* Cuadro de seguimiento */}
                   {showComposer && (
-                    <div className="mt-4 flex items-end gap-2 border-t border-border pt-4">
-                      <Textarea
-                        rows={1}
-                        value={followup}
-                        onChange={(e) => setFollowup(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            sendFollowup();
+                    <div className="mt-4 border-t border-border pt-4">
+                      {attachmentStrip}
+                      <div className="mt-1 flex items-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => fileInputRef.current?.click()}
+                          aria-label="Adjuntar imagen"
+                          className="shrink-0 text-muted hover:text-foreground"
+                        >
+                          <Paperclip className="h-4 w-4" />
+                        </Button>
+                        <Textarea
+                          rows={1}
+                          value={followup}
+                          onChange={(e) => setFollowup(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              sendFollowup();
+                            }
+                          }}
+                          placeholder={
+                            isFree && messages.length === 0
+                              ? "Escribe tu mensaje…"
+                              : "Responde, adjunta un ejemplo o pide un ajuste…"
                           }
-                        }}
-                        placeholder={
-                          isFree && messages.length === 0
-                            ? "Escribe tu mensaje…"
-                            : "Responde o pide un ajuste…"
-                        }
-                        className="max-h-32 resize-none"
-                      />
-                      <Button
-                        size="icon"
-                        onClick={sendFollowup}
-                        disabled={!followup.trim() || loading}
-                      >
-                        {loading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Send className="h-4 w-4" />
-                        )}
-                      </Button>
+                          className="max-h-32 resize-none"
+                        />
+                        <Button
+                          size="icon"
+                          onClick={sendFollowup}
+                          disabled={
+                            (!followup.trim() && attachments.length === 0) ||
+                            loading
+                          }
+                        >
+                          {loading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </Card>
