@@ -2,12 +2,20 @@
 // - "anthropic": Claude (máxima calidad; único que analiza enlaces con web_fetch).
 // - "openrouter": modelos gratuitos vía OpenRouter (API compatible con OpenAI).
 //   Requieren OPENROUTER_API_KEY en .env.local (gratis en openrouter.ai/keys).
-//   Los IDs ":free" dependen de la disponibilidad de OpenRouter; puedes editarlos aquí.
+//
+// FALLBACK AUTOMÁTICO: cada modelo de OpenRouter define una `chain` (lista de
+// IDs reales en orden de preferencia). Se envía a OpenRouter como el parámetro
+// `models`; si el primero está agotado / caído / con límite alcanzado, salta al
+// siguiente automáticamente (server-side, sin cortar el streaming).
+//
+// Los IDs ":free" de OpenRouter cambian con el tiempo. Si algún día toda una
+// cadena deja de responder, actualiza aquí los IDs (verifícalos en
+// https://openrouter.ai/models?q=free).
 
 export type Provider = "anthropic" | "openrouter";
 
 export interface AIModel {
-  /** ID que se envía al backend y a la API del proveedor */
+  /** ID estable que se envía al backend (identifica la opción en la app) */
   id: string;
   label: string;
   provider: Provider;
@@ -17,6 +25,11 @@ export interface AIModel {
   /** Admite herramientas web server-side (analizar enlaces) — solo Claude */
   web: boolean;
   hint?: string;
+  /**
+   * Solo OpenRouter: cadena de modelos reales en orden de preferencia.
+   * Se envía como `models` para tener fallback automático cuando uno se agota.
+   */
+  chain?: string[];
 }
 
 export const MODELS: AIModel[] = [
@@ -30,40 +43,35 @@ export const MODELS: AIModel[] = [
     hint: "Máxima calidad · analiza enlaces e imágenes",
   },
   {
-    id: "google/gemini-2.0-flash-exp:free",
-    label: "Gemini 2.0 Flash",
-    provider: "openrouter",
-    free: true,
-    vision: true,
-    web: false,
-    hint: "Gratis · admite imágenes",
-  },
-  {
-    id: "meta-llama/llama-3.2-11b-vision-instruct:free",
-    label: "Llama 3.2 Vision",
-    provider: "openrouter",
-    free: true,
-    vision: true,
-    web: false,
-    hint: "Gratis · admite imágenes",
-  },
-  {
-    id: "meta-llama/llama-3.3-70b-instruct:free",
-    label: "Llama 3.3 70B",
+    id: "free-power",
+    label: "Gratis · Máxima potencia",
     provider: "openrouter",
     free: true,
     vision: false,
     web: false,
-    hint: "Gratis · solo texto",
+    hint: "Gratis · modelos grandes (razonamiento) con relevo automático",
+    chain: [
+      "nvidia/nemotron-3-ultra-550b-a55b:free", // 550B · 1M contexto
+      "nvidia/nemotron-3-super-120b-a12b:free", // 120B · 1M contexto
+      "openai/gpt-oss-20b:free",
+      "nvidia/nemotron-3-nano-30b-a3b:free",
+      "poolside/laguna-xs-2.1:free",
+    ],
   },
   {
-    id: "deepseek/deepseek-r1:free",
-    label: "DeepSeek R1",
+    id: "free-vision",
+    label: "Gratis · Visión (imágenes)",
     provider: "openrouter",
     free: true,
-    vision: false,
+    vision: true,
     web: false,
-    hint: "Gratis · razonamiento (solo texto)",
+    hint: "Gratis · admite imágenes · con relevo automático",
+    chain: [
+      "google/gemma-4-26b-a4b-it:free",
+      "nvidia/nemotron-nano-12b-v2-vl:free",
+      "google/gemma-4-31b-it:free",
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    ],
   },
 ];
 
@@ -71,4 +79,9 @@ export const DEFAULT_MODEL = MODELS[0].id;
 
 export function getModel(id: string | null | undefined): AIModel {
   return MODELS.find((m) => m.id === id) ?? MODELS[0];
+}
+
+/** Cadena de IDs reales de OpenRouter para un modelo (fallback automático). */
+export function openRouterChain(m: AIModel): string[] {
+  return m.chain && m.chain.length > 0 ? m.chain : [m.id];
 }
