@@ -898,8 +898,24 @@ export default function Home() {
   async function doSignIn() {
     try {
       await signInWithGoogle();
-    } catch {
-      toast.error("No se pudo iniciar sesión con Google.");
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      console.error("[login] error:", err);
+      const code = err?.code || "";
+      let msg = "No se pudo iniciar sesión con Google.";
+      if (code === "auth/operation-not-allowed")
+        msg = "Activa el proveedor Google en Firebase → Authentication → Sign-in method.";
+      else if (code === "auth/unauthorized-domain")
+        msg = "Dominio no autorizado. Agrégalo en Firebase → Authentication → Settings → Authorized domains.";
+      else if (code === "auth/popup-blocked")
+        msg = "El navegador bloqueó la ventana emergente. Permite pop-ups y reintenta.";
+      else if (
+        code === "auth/popup-closed-by-user" ||
+        code === "auth/cancelled-popup-request"
+      )
+        msg = "Cerraste la ventana de Google antes de terminar.";
+      else if (code) msg = `No se pudo iniciar sesión (${code}).`;
+      toast.error(msg);
     }
   }
   async function doSignOut() {
