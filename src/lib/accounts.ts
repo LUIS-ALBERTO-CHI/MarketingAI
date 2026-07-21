@@ -83,8 +83,10 @@ export function accountBrandBlock(a: Account): string {
   if (a.tone?.trim()) s += `Tono de voz: ${a.tone.trim()}.\n`;
   if (a.colors?.trim()) s += `Colores de marca: ${a.colors.trim()}.\n`;
   if (a.contact?.trim())
-    s += `Contacto para incluir en los posts cuando aplique (úsalo tal cual, con sus emojis): ${a.contact.trim()}.\n`;
-  if (a.notes?.trim()) s += `Notas de la marca: ${a.notes.trim()}.\n`;
+    s += `Contacto para incluir en los posts de venta (úsalo tal cual, con sus emojis 📲/📍): ${a.contact.trim()}.\n`;
+  if (a.notes?.trim())
+    s +=
+      `Notas y FRASES FIJAS de la marca (repite de forma natural las frases fijas en CADA pieza de venta): ${a.notes.trim()}.\n`;
   s += `No inventes datos de la marca que no te haya dado.`;
   return s;
 }

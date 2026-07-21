@@ -1416,7 +1416,7 @@ export default function Home() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">
-              Notas (opcional)
+              Notas y frases fijas (opcional)
             </label>
             <Textarea
               rows={2}
@@ -1424,7 +1424,7 @@ export default function Home() {
               onChange={(e) =>
                 setEditingAccount({ ...editingAccount, notes: e.target.value })
               }
-              placeholder="Público, temas a evitar…"
+              placeholder="Frases fijas de marca (se repiten en venta), público, temas a evitar…"
             />
           </div>
           <div className="flex items-center gap-2">
