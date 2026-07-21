@@ -638,7 +638,7 @@ export default function Home() {
   }
 
   function generate() {
-    if (!selectedId || loading || missingRequired) return;
+    if (!selectedId || loading || extracting || missingRequired) return;
     const t = getTool(selectedId);
     if (!t) return;
     const convId = newId();
@@ -662,7 +662,25 @@ export default function Home() {
     }
     web = web && selectedModel.web; // las herramientas web solo existen en Claude
 
-    runTurn(system, [{ role: "user", content }], t.id, t.name, convId, true, web);
+    // Adjuntos del formulario: imágenes (visión) y documentos (texto/PDF).
+    const visionOk = selectedModel.vision;
+    if (attachments.length && !visionOk) {
+      toast.info(
+        "Este modelo no admite imágenes; se envían solo los datos. Cambia a un modelo con visión para analizarlas."
+      );
+    }
+    const imgs = visionOk ? attachments : [];
+    const docsToSend = docs;
+    const userMsg: Msg = {
+      role: "user",
+      content,
+      ...(imgs.length ? { images: imgs } : {}),
+      ...(docsToSend.length ? { docs: docsToSend } : {}),
+    };
+    if (visionOk) setAttachments([]);
+    setDocs([]);
+
+    runTurn(system, [userMsg], t.id, t.name, convId, true, web);
   }
 
   function sendFollowup() {
@@ -1521,10 +1539,26 @@ export default function Home() {
                       </Collapsible>
                     )}
 
+                    {/* Adjuntar archivos/imágenes al formulario de la herramienta */}
+                    <div className="rounded-xl border border-dashed border-border p-2">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        title="Adjuntar imagen, PDF, Word, Excel, CSV o TXT"
+                        className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface-2 hover:text-foreground"
+                      >
+                        <Paperclip className="h-4 w-4" /> Adjuntar archivo o imagen
+                        <span className="text-xs opacity-70">
+                          (PDF · Word · Excel · imagen)
+                        </span>
+                      </button>
+                      {attachmentStrip}
+                    </div>
+
                     <Button
                       size="lg"
                       onClick={generate}
-                      disabled={loading || missingRequired}
+                      disabled={loading || extracting || missingRequired}
                       aria-busy={loading}
                       className="w-full"
                     >
