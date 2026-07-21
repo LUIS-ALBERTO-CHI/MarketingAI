@@ -373,29 +373,49 @@ export default function Home() {
         toast.error(data?.error || "No se pudieron leer los archivos.");
         return;
       }
-      const ok: DocPart[] = [];
+      const okDocs: DocPart[] = [];
+      const okImgs: ImagePart[] = [];
+      let pdfAsImage = false;
       for (const r of data.files ?? []) {
         if (r.error) {
           toast.error(`${r.name}: ${r.error}`);
           continue;
         }
-        ok.push({
-          name: r.name,
-          text: r.text,
-          chars: r.chars,
-          truncated: r.truncated,
-        });
-        if (r.truncated) {
-          toast.info(`${r.name}: archivo largo, se analizará el inicio.`);
+        if (r.kind === "image" && Array.isArray(r.images) && r.images.length) {
+          // PDF de diseño/escaneado convertido a imágenes (se leen con visión).
+          okImgs.push(...r.images);
+          pdfAsImage = true;
+        } else if (r.text) {
+          okDocs.push({
+            name: r.name,
+            text: r.text,
+            chars: r.chars,
+            truncated: r.truncated,
+          });
+          if (r.truncated) {
+            toast.info(`${r.name}: archivo largo, se analizará el inicio.`);
+          }
         }
       }
-      if (ok.length) {
-        setDocs((prev) => [...prev, ...ok].slice(0, 6));
+      if (okImgs.length) {
+        setAttachments((prev) => [...prev, ...okImgs].slice(0, 6));
+      }
+      if (okDocs.length) {
+        setDocs((prev) => [...prev, ...okDocs].slice(0, 6));
+      }
+      if (okDocs.length || okImgs.length) {
         toast.success(
-          ok.length === 1
-            ? `Archivo listo: ${ok[0].name}`
-            : `${ok.length} archivos listos para analizar.`
+          pdfAsImage
+            ? "PDF sin texto: lo convertí a imágenes para analizarlo."
+            : okDocs.length === 1
+            ? `Archivo listo: ${okDocs[0].name}`
+            : `${okDocs.length} archivos listos para analizar.`
         );
+        if (pdfAsImage && !selectedModel.vision) {
+          toast.info(
+            "Este PDF es de diseño (imágenes). Cambia a un modelo con visión (Claude, Gemini, GPT o Gemma) para que lo lea."
+          );
+        }
       }
     } catch {
       toast.error("Error al subir los archivos.");
