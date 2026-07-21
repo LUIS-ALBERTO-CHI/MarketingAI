@@ -41,18 +41,20 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        if (model.provider === "openrouter") {
-          await streamOpenRouter(controller, encoder, {
-            system,
-            messages: clean,
-            model: model.id,
-          });
-        } else {
+        if (model.provider === "anthropic") {
           await streamAnthropic(controller, encoder, {
             system,
             messages: clean,
             web: !!web && model.web,
             model: model.id,
+          });
+        } else {
+          // OpenRouter y Google/Gemini: ambos con formato OpenAI.
+          await streamOpenAICompatible(controller, encoder, {
+            system,
+            messages: clean,
+            model: model.id,
+            provider: model.provider,
           });
         }
       } catch (err) {
@@ -145,25 +147,59 @@ async function streamAnthropic(
   }
 }
 
-// ---------- Modelos gratuitos (OpenRouter, compatible con OpenAI) ----------
-async function streamOpenRouter(
+// ---------- Proveedores compatibles con OpenAI (OpenRouter y Google/Gemini) ----------
+// Ambos exponen /chat/completions con el mismo formato SSE, así que comparten código.
+type OACompatConfig = {
+  url: string;
+  apiKey: string | undefined;
+  extraHeaders?: Record<string, string>;
+  providerLabel: string;
+  missingKeyMessage: string;
+};
+
+function oaConfig(provider: string): OACompatConfig {
+  if (provider === "google") {
+    return {
+      url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      apiKey: process.env.GEMINI_API_KEY,
+      providerLabel: "Gemini (Google)",
+      missingKeyMessage:
+        "\n\n**[Falta configurar Gemini]** Para usar modelos Gemini necesitas una clave de Google.\n\n" +
+        "1. Crea una en **aistudio.google.com/apikey**.\n" +
+        "2. Añade `GEMINI_API_KEY=tu_clave` en tu archivo `.env.local` (y en Vercel).\n" +
+        "3. Reinicia el servidor.\n\n" +
+        "Mientras tanto, puedes usar **Claude Opus 4.8** o los modelos gratis.",
+    };
+  }
+  // Por defecto: OpenRouter
+  return {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    apiKey: process.env.OPENROUTER_API_KEY,
+    extraHeaders: {
+      "HTTP-Referer": "https://marketingai.app",
+      "X-Title": "MarketingAI",
+    },
+    providerLabel: "OpenRouter",
+    missingKeyMessage:
+      "\n\n**[Falta configurar el modelo]** Para usar este modelo necesitas una clave de OpenRouter (gratis).\n\n" +
+      "1. Crea una en **openrouter.ai/keys**.\n" +
+      "2. Añade `OPENROUTER_API_KEY=tu_clave` en tu archivo `.env.local`.\n" +
+      "3. Reinicia el servidor.\n\n" +
+      "Mientras tanto, puedes seguir usando **Claude Opus 4.8**.",
+  };
+}
+
+async function streamOpenAICompatible(
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
-  opts: { system?: string; messages: Msg[]; model: string }
+  opts: { system?: string; messages: Msg[]; model: string; provider: string }
 ) {
-  const { system, messages, model } = opts;
-  const key = process.env.OPENROUTER_API_KEY;
+  const { system, messages, model, provider } = opts;
+  const cfg = oaConfig(provider);
+  const key = cfg.apiKey;
 
   if (!key) {
-    controller.enqueue(
-      encoder.encode(
-        "\n\n**[Falta configurar el modelo gratuito]** Para usar modelos gratuitos necesitas una clave de OpenRouter (gratis).\n\n" +
-          "1. Crea una en **openrouter.ai/keys**.\n" +
-          "2. Añade `OPENROUTER_API_KEY=tu_clave` en tu archivo `.env.local`.\n" +
-          "3. Reinicia el servidor.\n\n" +
-          "Mientras tanto, puedes seguir usando **Claude Opus 4.8**."
-      )
-    );
+    controller.enqueue(encoder.encode(cfg.missingKeyMessage));
     return;
   }
 
@@ -188,13 +224,12 @@ async function streamOpenRouter(
 
   let res: Response;
   try {
-    res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    res = await fetch(cfg.url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://marketingai.app",
-        "X-Title": "MarketingAI",
+        ...(cfg.extraHeaders ?? {}),
       },
       body: JSON.stringify({
         model,
@@ -206,7 +241,11 @@ async function streamOpenRouter(
   } catch (err) {
     controller.enqueue(
       encoder.encode(
-        `\n\n[Error de red] ${err instanceof Error ? err.message : "No se pudo contactar con OpenRouter."}`
+        `\n\n[Error de red] ${
+          err instanceof Error
+            ? err.message
+            : `No se pudo contactar con ${cfg.providerLabel}.`
+        }`
       )
     );
     return;

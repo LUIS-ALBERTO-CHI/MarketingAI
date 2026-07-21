@@ -10,7 +10,7 @@
 // Los IDs de OpenRouter cambian con el tiempo. Si alguno deja de responder,
 // actualízalo aquí (verifícalo en https://openrouter.ai/models).
 
-export type Provider = "anthropic" | "openrouter";
+export type Provider = "anthropic" | "openrouter" | "google";
 
 export interface AIModel {
   /** ID que se envía al proveedor (y que identifica la opción en la app) */
@@ -48,13 +48,22 @@ export const MODELS: AIModel[] = [
     hint: "De pago · OpenAI · admite imágenes",
   },
   {
-    id: "google/gemini-3.5-flash",
-    label: "Gemini 3.5 Flash",
-    provider: "openrouter",
-    free: false,
+    id: "gemini-flash-latest",
+    label: "Gemini Flash",
+    provider: "google",
+    free: true,
     vision: true,
     web: false,
-    hint: "De pago · Google · rápido · admite imágenes",
+    hint: "Tu clave de Google · rápido · admite imágenes",
+  },
+  {
+    id: "gemini-pro-latest",
+    label: "Gemini Pro",
+    provider: "google",
+    free: true,
+    vision: true,
+    web: false,
+    hint: "Tu clave de Google · máxima calidad Gemini · admite imágenes",
   },
   {
     id: "deepseek/deepseek-v3.2",
