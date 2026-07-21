@@ -1,5 +1,6 @@
 // Catálogo de herramientas de marketing con IA.
-// Cada herramienta define su formulario y cómo construir el prompt para Claude.
+// Simplificado: UNA sola herramienta principal ("Generador de Posts") que
+// SIEMPRE devuelve la misma tabla lista para publicar: Post · Copy · Inspo · Hashtags.
 
 export type FieldType = "text" | "textarea" | "select";
 
@@ -36,6 +37,8 @@ export const ACCOUNT_FIELD: ToolField = {
   placeholder: "URL o @usuario — la IA analiza su estilo de contenido",
 };
 
+const REDES = ["Instagram", "LinkedIn", "TikTok", "X (Twitter)", "Facebook", "YouTube"];
+
 const TONOS = [
   "Profesional",
   "Cercano y amigable",
@@ -45,29 +48,64 @@ const TONOS = [
   "Elegante / premium",
 ];
 
-const REDES = ["Instagram", "LinkedIn", "TikTok", "X (Twitter)", "Facebook", "YouTube"];
+// ---------------------------------------------------------------------------
+// FORMATO ESTÁNDAR DE RESPUESTA (compartido por la herramienta y el chat libre).
+// Siempre una tabla Markdown con 4 columnas: Post | Copy | Inspo | Hashtags.
+// ---------------------------------------------------------------------------
+export const TABLE_FORMAT = `Devuelve EXCLUSIVAMENTE una tabla en Markdown (GFM) con EXACTAMENTE estas 4 columnas, en este orden:
+
+Post | Copy | Inspo | Hashtags
+
+Una fila por idea de publicación. Reglas de formato ESTRICTAS (o la tabla se rompe):
+- Usa la etiqueta <br> para TODOS los saltos de línea dentro de las celdas (nunca saltos de línea reales ni viñetas con guion). NUNCA uses el carácter | dentro de una celda.
+- **Post**: un título corto en MAYÚSCULAS y, debajo (con <br>), 2-4 líneas con el ángulo o gancho. Si falta una acción del usuario, anótala como "AGREGAR PROMO %" o similar.
+- **Copy**: el texto COMPLETO listo para publicar (gancho + cuerpo + beneficios con ✅ + una llamada a la acción clara). Cuando haya datos, incluye dirección con 📍 y contacto con 📲. Saltos con <br>. Español de México, con gancho y emojis usados con criterio.
+- **Inspo**: un enlace de BÚSQUEDA de Pinterest para inspiración visual, en formato [ver inspiración](https://www.pinterest.com/search/pins/?q=TERMINOS) con TERMINOS en inglés separados por %20. No inventes enlaces a pines concretos; usa siempre la búsqueda.
+- **Hashtags**: de 6 a 12 hashtags relevantes para la plataforma y el tema, separados por espacios (ej. #Enfermería #Convocatoria). Sin comas ni el carácter |.
+
+No escribas nada antes ni después de la tabla y no la envuelvas en un bloque de código.`;
+
+export const TABLE_SYSTEM =
+  "Eres estratega de contenido y copywriter sénior. A partir de lo que pida el usuario, produces publicaciones listas para trabajar en una tabla de 4 columnas: Post (título/gancho), Copy (texto completo listo para publicar), Inspo (referencia visual de Pinterest) y Hashtags. Escribes en español de México, con copy persuasivo, estructura clara (gancho, beneficios, CTA) y emojis usados con criterio. Devuelves siempre una tabla Markdown válida siguiendo el formato indicado.";
 
 export const TOOLS: Tool[] = [
   {
     id: "posts",
     name: "Generador de Posts",
-    tagline: "Publicaciones para redes sociales listas para publicar",
-    icon: "Megaphone",
-    system:
-      "Eres un community manager experto y estratega de redes sociales. Escribes posts nativos para cada plataforma, con ganchos potentes en la primera línea, estructura clara y una llamada a la acción. Usas emojis con criterio (no en exceso) e incluyes hashtags relevantes al final.",
+    tagline: "Describe lo que quieres y recibe posts listos: copy, inspo y hashtags",
+    icon: "Table",
+    system: TABLE_SYSTEM,
     fields: [
-      { name: "red", label: "Red social", type: "select", options: REDES, required: true },
-      { name: "tema", label: "Tema o producto", type: "text", placeholder: "Ej: lanzamiento de nuestra app de finanzas", required: true },
-      { name: "objetivo", label: "Objetivo", type: "select", options: ["Dar a conocer", "Generar interacción", "Vender", "Educar", "Fidelizar"] },
-      { name: "tono", label: "Tono", type: "select", options: TONOS },
-      { name: "extra", label: "Detalles adicionales", type: "textarea", placeholder: "Público objetivo, promociones, datos clave...", rows: 3 },
+      {
+        name: "tema",
+        label: "¿Qué quieres?",
+        type: "textarea",
+        rows: 3,
+        placeholder:
+          "Ej: convocatoria de inscripciones para enfermería con 20% de descuento; o pega tu texto / arrastra un PDF o imagen",
+        required: true,
+      },
+      { name: "red", label: "Red social (opcional)", type: "select", options: REDES },
+      {
+        name: "negocio",
+        label: "Negocio / marca (opcional)",
+        type: "text",
+        placeholder: "Ej: IMEI — escuela de enfermería",
+      },
+      {
+        name: "datos",
+        label: "Datos a incluir (opcional)",
+        type: "textarea",
+        rows: 2,
+        placeholder: "Dirección, WhatsApp/enlace, promoción, fechas, público objetivo…",
+      },
     ],
     buildPrompt: (v) =>
-      `Crea 3 variantes de post para ${v.red} sobre: "${v.tema}".\n` +
-      `Objetivo principal: ${v.objetivo || "generar interacción"}.\n` +
-      `Tono: ${v.tono || "cercano y amigable"}.\n` +
-      (v.extra ? `Contexto adicional: ${v.extra}\n` : "") +
-      `Para cada variante incluye: gancho, cuerpo, llamada a la acción y una línea de hashtags. Numera las variantes.`,
+      `Genera de 3 a 5 ideas de publicación sobre: "${v.tema}".\n` +
+      (v.red ? `Red social: ${v.red}.\n` : "") +
+      (v.negocio ? `Negocio/marca: ${v.negocio}.\n` : "") +
+      (v.datos ? `Datos a incluir cuando aplique: ${v.datos}\n` : "") +
+      `\n${TABLE_FORMAT}`,
   },
   {
     id: "copywriting",
@@ -109,65 +147,6 @@ export const TOOLS: Tool[] = [
       `Meta principal: ${v.meta || "aumentar ventas"}.\n` +
       (v.extra ? `Contexto: ${v.extra}\n` : "") +
       `Para cada idea indica: título, formato/canal recomendado, breve descripción y por qué funcionaría. Organízalas en una lista numerada.`,
-  },
-  {
-    id: "email",
-    name: "Email Marketing",
-    tagline: "Secuencias y newsletters que se abren y se leen",
-    icon: "Mail",
-    system:
-      "Eres especialista en email marketing. Escribes asuntos con alta tasa de apertura, preheaders efectivos y cuerpos de email estructurados con una única llamada a la acción clara.",
-    fields: [
-      { name: "tipo", label: "Tipo de email", type: "select", options: ["Newsletter", "Email de bienvenida", "Email de venta / oferta", "Carrito abandonado", "Reactivación", "Anuncio / lanzamiento"], required: true },
-      { name: "producto", label: "Producto / tema", type: "text", placeholder: "Ej: oferta de Black Friday", required: true },
-      { name: "audiencia", label: "Audiencia", type: "text", placeholder: "Ej: clientes que compraron hace +3 meses" },
-      { name: "tono", label: "Tono", type: "select", options: TONOS },
-      { name: "extra", label: "Detalles (oferta, fechas, enlaces)", type: "textarea", rows: 3 },
-    ],
-    buildPrompt: (v) =>
-      `Escribe un email de tipo "${v.tipo}" sobre: "${v.producto}".\n` +
-      (v.audiencia ? `Audiencia: ${v.audiencia}.\n` : "") +
-      `Tono: ${v.tono || "cercano"}.\n` +
-      (v.extra ? `Detalles: ${v.extra}\n` : "") +
-      `Entrega: 3 opciones de asunto (con estimación de por qué funcionan), 1 preheader, y el cuerpo completo del email con una única llamada a la acción.`,
-  },
-  {
-    id: "seo",
-    name: "SEO & Hashtags",
-    tagline: "Palabras clave, hashtags y meta-descripciones",
-    icon: "Hash",
-    system:
-      "Eres experto en SEO y descubrimiento de contenido. Propones palabras clave con intención de búsqueda, hashtags relevantes por plataforma y meta-descripciones optimizadas.",
-    fields: [
-      { name: "tema", label: "Tema / producto", type: "text", placeholder: "Ej: zapatillas de running sostenibles", required: true },
-      { name: "canal", label: "Canal", type: "select", options: ["Google (SEO web)", "Instagram", "TikTok", "YouTube", "LinkedIn"] },
-      { name: "extra", label: "Contexto adicional", type: "textarea", rows: 2, placeholder: "Ubicación, público, competencia..." },
-    ],
-    buildPrompt: (v) =>
-      `Para el tema "${v.tema}" y el canal "${v.canal || "Google (SEO web)"}", entrega:\n` +
-      `1) 10-15 palabras clave / términos con su intención de búsqueda,\n` +
-      `2) un set de hashtags recomendados agrupados por alcance (amplios, nicho, marca) si el canal es social,\n` +
-      `3) una meta-descripción o bio optimizada (máx. 155 caracteres).\n` +
-      (v.extra ? `Contexto: ${v.extra}` : ""),
-  },
-  {
-    id: "ads",
-    name: "Anuncios Pagados",
-    tagline: "Google Ads y Meta Ads listos para lanzar",
-    icon: "Target",
-    system:
-      "Eres especialista en publicidad de pago (Google Ads y Meta Ads). Escribes anuncios que cumplen límites de caracteres, con ganchos, beneficios y CTAs claros, y sugieres segmentación.",
-    fields: [
-      { name: "plataforma", label: "Plataforma", type: "select", options: ["Google Ads (búsqueda)", "Meta Ads (Facebook/Instagram)", "TikTok Ads"], required: true },
-      { name: "producto", label: "Producto / oferta", type: "text", placeholder: "Ej: software de facturación para autónomos", required: true },
-      { name: "audiencia", label: "Público objetivo", type: "text", placeholder: "Ej: autónomos y pymes en España" },
-      { name: "extra", label: "Oferta / ángulo", type: "textarea", rows: 2, placeholder: "Descuento, prueba gratis, propuesta única..." },
-    ],
-    buildPrompt: (v) =>
-      `Crea una campaña de anuncios para ${v.plataforma} promocionando: "${v.producto}".\n` +
-      (v.audiencia ? `Público: ${v.audiencia}.\n` : "") +
-      (v.extra ? `Ángulo/oferta: ${v.extra}.\n` : "") +
-      `Entrega, respetando los límites de caracteres de la plataforma: varios titulares, descripciones, textos principales y CTAs. Añade una sugerencia breve de segmentación.`,
   },
   {
     id: "calendar",
@@ -227,260 +206,27 @@ export const TOOLS: Tool[] = [
       `Empieza con un gancho potente en los primeros 3 segundos y cierra con una llamada a la acción clara. ` +
       `Añade al final 2-3 sugerencias de título/caption y notas breves de producción.`,
   },
-  {
-    id: "competitor",
-    name: "Análisis de Competencia",
-    tagline: "Compara, detecta huecos y encuentra oportunidades",
-    icon: "TrendingUp",
-    system:
-      "Eres analista de marketing estratégico. Analizas competidores con rigor: posicionamiento, propuesta de valor, contenido, fortalezas y debilidades, y detectas oportunidades accionables. Trabajas con la información que te dé el usuario y tu conocimiento general; cuando hagas una suposición, indícalo claramente y no inventes datos concretos (cifras, precios exactos) que no puedas conocer.",
-    fields: [
-      { name: "marca", label: "Tu marca / producto", type: "text", placeholder: "Ej: nuestra cafetería de especialidad", required: true },
-      { name: "competidores", label: "Competidores a analizar", type: "textarea", rows: 3, placeholder: "Lista de competidores (uno por línea o separados por comas)", required: true },
-      { name: "sector", label: "Sector / mercado", type: "text", placeholder: "Ej: cafeterías en Madrid centro" },
-      { name: "foco", label: "Foco del análisis", type: "select", options: ["General (360°)", "Posicionamiento y marca", "Contenido y redes sociales", "Propuesta de valor", "Estrategia de precios", "Público objetivo"] },
-      { name: "extra", label: "Contexto adicional", type: "textarea", rows: 3, placeholder: "Lo que sepas de cada competidor, tus objetivos, tu diferenciación..." },
-    ],
-    buildPrompt: (v) =>
-      `Realiza un análisis de competencia para "${v.marca}".\n` +
-      `Competidores a analizar:\n${v.competidores}\n` +
-      (v.sector ? `Sector/mercado: ${v.sector}.\n` : "") +
-      `Foco principal: ${v.foco || "General (360°)"}.\n` +
-      (v.extra ? `Contexto: ${v.extra}\n` : "") +
-      `Entrega:\n` +
-      `1) Una tabla comparativa (competidor | propuesta de valor | fortalezas | debilidades | tono/contenido).\n` +
-      `2) Un breve análisis DAFO/SWOT centrado en tu marca frente a esa competencia.\n` +
-      `3) Huecos de mercado y oportunidades sin cubrir.\n` +
-      `4) 3-5 recomendaciones accionables y priorizadas para diferenciarte.\n` +
-      `Marca claramente cualquier suposición; no inventes cifras o precios exactos.`,
-  },
-  {
-    id: "design",
-    name: "Diseño & Dirección de Arte",
-    tagline: "Conceptos y prompts para diseños que no parecen hechos por IA",
-    icon: "Palette",
-    system:
-      "Eres director de arte y diseñador gráfico sénior de una agencia premium. Traduces una marca en una dirección visual concreta y accionable: paleta (con códigos HEX), tipografías reales, composición, jerarquía y estética. Generas prompts de imagen en inglés, específicos, con sujeto, estilo, encuadre, iluminación y color. Tu obsesión es que el resultado se vea profesional y HUMANO, nunca con el aspecto genérico de 'IA': evitas tipografías cliché (Inter, Roboto, Arial, fuentes de sistema), degradados morados sobre blanco/negro, composiciones simétricas y predecibles, brillos de plástico y el look de banco de imágenes. Buscas carácter, intención, imperfección deliberada y coherencia de marca. " +
-      "IMPORTANTE: la aplicación genera imágenes automáticamente a partir de los prompts que marques con [[IMG]]. Cada prompt de imagen debe ir en su PROPIA línea, empezando EXACTAMENTE con `[[IMG]] ` seguido del prompt en inglés y nada más en esa línea. Sin viñetas, sin comillas, sin numeración y sin bloque de código en esas líneas. Los prompts describen una imagen fotográfica o ilustrada SIN texto ni logotipos embebidos (los generadores fallan con texto).",
-    fields: [
-      {
-        name: "pieza",
-        label: "Tipo de diseño",
-        type: "select",
-        options: [
-          "Post para redes",
-          "Historia / Story",
-          "Flyer / Cartel",
-          "Portada / Banner",
-          "Miniatura de video",
-          "Concepto de logo",
-          "Diapositiva / Presentación",
-          "Empaque / Packaging",
-        ],
-        required: true,
-      },
-      {
-        name: "marca",
-        label: "Marca / tema",
-        type: "text",
-        placeholder: "Ej: cafetería de especialidad 'Aurora'",
-        required: true,
-      },
-      {
-        name: "estetica",
-        label: "Estética",
-        type: "select",
-        options: [
-          "Minimalista premium",
-          "Elegante / lujo",
-          "Moderno y fresco",
-          "Editorial",
-          "Retro / vintage",
-          "Orgánico / natural",
-          "Corporativo",
-          "Divertido y colorido",
-        ],
-      },
-      {
-        name: "colores",
-        label: "Colores de marca (opcional)",
-        type: "text",
-        placeholder: "HEX o descripción; o deja que la IA proponga",
-      },
-      {
-        name: "generador",
-        label: "¿Para qué generador de imágenes?",
-        type: "select",
-        options: [
-          "Midjourney",
-          "DALL·E / ChatGPT",
-          "Ideogram (bueno con texto)",
-          "Genérico / cualquiera",
-        ],
-      },
-      {
-        name: "extra",
-        label: "Mensaje, elementos y público",
-        type: "textarea",
-        rows: 3,
-        placeholder:
-          "Qué debe comunicar, texto que va en la pieza, público objetivo, elementos obligatorios…",
-      },
-    ],
-    buildPrompt: (v) =>
-      `Crea la dirección de arte para: "${v.marca}".\n` +
-      `Pieza: ${v.pieza}. Estética: ${v.estetica || "minimalista premium"}.\n` +
-      (v.colores ? `Colores de marca: ${v.colores}.\n` : "Propón una paleta adecuada.\n") +
-      (v.extra ? `Contexto: ${v.extra}\n` : "") +
-      `\nEntrega en este orden, en formato claro y escaneable:\n` +
-      `1) **Concepto** (2-3 líneas): la idea visual y qué sensación transmite.\n` +
-      `2) **Sistema visual**: paleta con códigos HEX (indicando para qué usar cada color), 1-2 tipografías reales con su rol (título / cuerpo), estilo de imagen o ilustración, tratamiento (formas, texturas, sombras, espaciado) y una descripción del layout y la jerarquía para un(a) ${v.pieza}.\n` +
-      `3) **Para que NO parezca IA**: 4-5 recomendaciones concretas para esta pieza —qué evitar y cómo lograr un acabado humano, profesional y con carácter de marca. Si vas a poner texto en la pieza (título, precio), hazlo tú después en un editor; no lo metas en el prompt.\n` +
-      `\nAl FINAL de todo, sin ningún encabezado, escribe exactamente 2 líneas sueltas que empiecen con \`[[IMG]] \` seguidas de un prompt en inglés (sujeto, estilo, encuadre, iluminación, color; SIN texto ni logotipos embebidos). La app las convierte en imágenes reales, así que no las numeres ni las pongas en viñetas ni en bloque de código.\n` +
-      `Marca cualquier suposición. No uses tipografías cliché ni degradados morados genéricos.`,
-  },
-  {
-    id: "content-table",
-    name: "Ideas de Posts (Tema · Copy · Inspo)",
-    tagline: "Pasa un tema y recibe una tabla lista: gancho, copy e inspiración",
-    icon: "Table",
-    system:
-      "Eres estratega de contenido y copywriter sénior. A partir de un tema o idea, produces una tabla lista para trabajar con 3 columnas: Tema (título/gancho), Copy (texto completo listo para publicar) e Inspo (referencia visual). Escribes en español de México, con copy persuasivo, estructura clara (gancho, beneficios, CTA) y emojis usados con criterio. Devuelves siempre una tabla Markdown válida.",
-    fields: [
-      {
-        name: "tema",
-        label: "Tema o idea",
-        type: "textarea",
-        rows: 3,
-        placeholder:
-          "Ej: convocatoria de inscripciones para la carrera de enfermería con promo de descuento",
-        required: true,
-      },
-      {
-        name: "cantidad",
-        label: "Cuántas ideas",
-        type: "select",
-        options: ["3", "5", "8"],
-      },
-      { name: "red", label: "Red social", type: "select", options: REDES },
-      {
-        name: "negocio",
-        label: "Negocio / marca (opcional)",
-        type: "text",
-        placeholder: "Ej: IMEI — escuela de enfermería",
-      },
-      {
-        name: "datos",
-        label: "Datos a incluir (opcional)",
-        type: "textarea",
-        rows: 2,
-        placeholder:
-          "Dirección, WhatsApp/enlace, promoción, fechas, público objetivo…",
-      },
-    ],
-    buildPrompt: (v) =>
-      `Genera ${v.cantidad || "5"} ideas de publicación sobre: "${v.tema}".\n` +
-      (v.red ? `Red social: ${v.red}.\n` : "") +
-      (v.negocio ? `Negocio/marca: ${v.negocio}.\n` : "") +
-      (v.datos ? `Datos a incluir cuando aplique: ${v.datos}\n` : "") +
-      `\nDevuelve EXCLUSIVAMENTE una tabla en Markdown (GFM) con EXACTAMENTE estas 3 columnas: Tema | Copy | Inspo. Una fila por idea. Reglas de formato estrictas:\n` +
-      `- Usa la etiqueta <br> para TODOS los saltos de línea dentro de las celdas (nunca saltos reales ni viñetas con guion, que rompen la tabla). NUNCA uses el carácter | dentro de una celda.\n` +
-      `- **Tema**: un título corto en MAYÚSCULAS y, debajo (con <br>), 2-4 líneas con el ángulo o gancho; si aplica una acción pendiente, anótala como "AGREGAR PROMO %".\n` +
-      `- **Copy**: el texto COMPLETO listo para publicar, con gancho, cuerpo, beneficios (usa ✅), una llamada a la acción clara y —cuando haya datos— dirección con 📍 y contacto con 📲. Saltos con <br>. En español de México.\n` +
-      `- **Inspo**: un enlace de BÚSQUEDA de Pinterest para inspiración visual, en formato [ver inspiración](https://www.pinterest.com/search/pins/?q=TERMINOS) con TERMINOS en inglés separados por %20. No inventes enlaces a pines concretos; usa la búsqueda.\n` +
-      `No escribas nada antes ni después de la tabla y no la envuelvas en bloque de código.`,
-  },
-  {
-    id: "post-image",
-    name: "Post con imagen",
-    tagline: "Genera una publicación diseñada (texto perfecto) lista para descargar",
-    icon: "PostImage",
-    system:
-      "Eres director de arte. A partir de un tema, defines el CONTENIDO ESTRUCTURADO de una publicación para redes que la app renderiza como imagen (el texto se dibuja en HTML, así que sale nítido). Eliges una paleta coherente y profesional, y un fondo (foto/ilustración) que combine con la marca, sin texto embebido. El texto visible va en español de México, breve y con gancho.",
-    fields: [
-      {
-        name: "tema",
-        label: "Tema o idea del post",
-        type: "textarea",
-        rows: 2,
-        placeholder: "Ej: promo de vacunación y desparasitación para mascotas",
-        required: true,
-      },
-      {
-        name: "negocio",
-        label: "Marca / negocio",
-        type: "text",
-        placeholder: "Ej: Veterinaria Godínez",
-      },
-      {
-        name: "contacto",
-        label: "Contacto a mostrar (opcional)",
-        type: "text",
-        placeholder: "Ej: 📲 999 105 3995 · 📍 Centro, Mérida",
-      },
-      {
-        name: "estetica",
-        label: "Estética",
-        type: "select",
-        options: [
-          "Moderno oscuro",
-          "Minimalista premium",
-          "Elegante / lujo",
-          "Fresco y colorido",
-          "Corporativo",
-        ],
-      },
-      {
-        name: "colores",
-        label: "Colores de marca (opcional)",
-        type: "text",
-        placeholder: "HEX o descripción; o deja que la IA proponga",
-      },
-    ],
-    buildPrompt: (v) =>
-      `Diseña una publicación sobre: "${v.tema}".\n` +
-      (v.negocio ? `Marca: ${v.negocio}.\n` : "") +
-      (v.contacto ? `Contacto a mostrar: ${v.contacto}.\n` : "") +
-      `Estética: ${v.estetica || "moderno oscuro"}.` +
-      (v.colores ? ` Colores: ${v.colores}.` : " Propón una paleta coherente.") +
-      `\n\nEscribe 1 línea de introducción y, al FINAL, un ÚNICO bloque \`\`\`json con exactamente esta forma (sin comentarios):\n` +
-      `{\n` +
-      `  "brand": "nombre de la marca en mayúsculas o vacío",\n` +
-      `  "headline": "titular corto y potente (máx ~6 palabras)",\n` +
-      `  "subhead": "1 línea de apoyo (opcional)",\n` +
-      `  "bullets": ["beneficio 1", "beneficio 2", "beneficio 3"],\n` +
-      `  "cta": "llamada a la acción corta (ej. Agenda hoy)",\n` +
-      `  "contact": "línea de contacto con emojis o vacío",\n` +
-      `  "palette": { "bg": "#RRGGBB oscuro", "accent": "#RRGGBB vivo", "text": "#RRGGBB claro" },\n` +
-      `  "bgPrompt": "prompt en inglés para el fondo (foto o textura acorde al tema, SIN texto ni logos)",\n` +
-      `  "ratio": "4:5"\n` +
-      `}\n` +
-      `Reglas: texto visible en español de México, breve; paleta con buen contraste (bg oscuro, text claro, accent vivo); 3-4 bullets como máximo; el bgPrompt en inglés y sin texto. Devuelve solo la introducción y el bloque json.`,
-  },
 ];
 
-// Herramientas que pueden analizar una cuenta con búsqueda web.
-const WEB_AWARE = new Set([
-  "posts",
-  "copywriting",
-  "ideas",
-  "email",
-  "ads",
-  "calendar",
-  "video-script",
-  "design",
-  "content-table",
-]);
+// Herramientas que pueden analizar una cuenta con búsqueda web (solo Claude).
+const WEB_AWARE = new Set(["posts", "copywriting", "ideas", "calendar", "video-script"]);
 for (const t of TOOLS) if (WEB_AWARE.has(t.id)) t.webAware = true;
 
 // Herramienta de chat libre para la barra de entrada del inicio.
+// También devuelve la tabla estándar cuando se piden posts/ideas de contenido.
 export const FREE_TOOL: Tool = {
   id: "free",
   name: "Chat libre",
   tagline: "Pídele lo que necesites",
   icon: "Sparkles",
   system:
-    "Eres un asistente experto en marketing digital: estrategia, contenido, copywriting, redes sociales, SEO, email y publicidad. Respondes de forma clara, práctica y accionable, con formato Markdown cuando ayude a la legibilidad.",
+    "Eres un asistente experto en marketing digital y copywriter sénior. " +
+    "Cuando el usuario pida publicaciones, posts, ideas de contenido o copy para redes " +
+    "(o simplemente te dé un tema/negocio para promocionar), responde SIEMPRE con la tabla " +
+    "estándar de 4 columnas (Post | Copy | Inspo | Hashtags) siguiendo estas reglas:\n\n" +
+    TABLE_FORMAT +
+    "\n\nSolo cuando el usuario pida claramente OTRA cosa (un ajuste puntual a algo ya entregado, " +
+    "una explicación, una estrategia, análisis, etc.) responde en Markdown normal, sin la tabla.",
   fields: [
     { name: "prompt", label: "Tu petición", type: "textarea", required: true, rows: 3 },
   ],
