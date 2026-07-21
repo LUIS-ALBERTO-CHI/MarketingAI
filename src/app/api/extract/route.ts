@@ -1,7 +1,5 @@
 import * as XLSX from "xlsx";
 import mammoth from "mammoth";
-import { extractText, getDocumentProxy } from "unpdf";
-import { pdf as pdfToImages } from "pdf-to-img";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,47 +8,23 @@ export const dynamic = "force-dynamic";
 const MAX_CHARS = 60_000;
 // Límite de tamaño por archivo (bytes).
 const MAX_BYTES = 12 * 1024 * 1024;
-// Por debajo de esto consideramos que el PDF "no tiene texto" (es de diseño /
-// escaneado) y lo convertimos a imágenes para que lo lea un modelo con visión.
-const MIN_PDF_TEXT = 80;
-// Máximo de páginas a rasterizar (protege memoria y tokens).
-const MAX_PDF_PAGES = 6;
 
-type ImgPart = { mediaType: string; data: string };
+// NOTA: los PDF se procesan en el NAVEGADOR (pdf.js), no aquí, para evitar
+// dependencias nativas en el entorno serverless de Vercel. Esta ruta solo
+// maneja Word, Excel, CSV y texto (todo JS puro, sin binarios).
 
 type ExtractResult = {
   name: string;
-  // "text": se extrajo texto · "image": PDF de diseño convertido a imágenes.
-  kind: "text" | "image";
+  kind: "text";
   chars: number;
   truncated: boolean;
   text: string;
-  images?: ImgPart[];
-  pages?: number;
   error?: string;
 };
 
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
-}
-
-// Rasteriza las primeras páginas de un PDF a PNG (base64). Se usa cuando el
-// PDF no tiene texto seleccionable (trípticos, folletos, escaneos).
-async function renderPdfPages(buf: Buffer): Promise<ImgPart[]> {
-  const images: ImgPart[] = [];
-  try {
-    const doc = await pdfToImages(new Uint8Array(buf), { scale: 2 });
-    let n = 0;
-    for await (const page of doc) {
-      if (n >= MAX_PDF_PAGES) break;
-      images.push({ mediaType: "image/png", data: page.toString("base64") });
-      n++;
-    }
-  } catch {
-    return [];
-  }
-  return images;
 }
 
 async function extractOne(file: File): Promise<ExtractResult> {
@@ -73,30 +47,7 @@ async function extractOne(file: File): Promise<ExtractResult> {
   let text = "";
 
   try {
-    if (ext === "pdf" || type.includes("pdf")) {
-      const doc = await getDocumentProxy(new Uint8Array(buf));
-      const res = await extractText(doc, { mergePages: true });
-      text = (Array.isArray(res.text) ? res.text.join("\n") : res.text) || "";
-
-      // PDF de diseño / escaneado (sin texto seleccionable): lo convertimos a
-      // imágenes de página para que un modelo con visión pueda leerlo.
-      if (text.trim().length < MIN_PDF_TEXT) {
-        const images = await renderPdfPages(buf);
-        if (images.length) {
-          return {
-            ...base,
-            kind: "image",
-            images,
-            pages: images.length,
-          };
-        }
-        return {
-          ...base,
-          error:
-            "No se pudo leer el PDF (ni texto ni imágenes de página). Prueba a exportarlo de nuevo.",
-        };
-      }
-    } else if (
+    if (
       ext === "docx" ||
       type.includes("officedocument.wordprocessingml")
     ) {
@@ -146,10 +97,7 @@ async function extractOne(file: File): Promise<ExtractResult> {
 
   text = text.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!text) {
-    return {
-      ...base,
-      error: "No se encontró texto en el archivo.",
-    };
+    return { ...base, error: "No se encontró texto en el archivo." };
   }
 
   const truncated = text.length > MAX_CHARS;

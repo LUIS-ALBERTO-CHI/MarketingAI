@@ -326,7 +326,8 @@ export default function Home() {
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     const imgParts: ImagePart[] = [];
-    const docFiles: File[] = [];
+    const docFiles: File[] = []; // Word/Excel/CSV/TXT → servidor
+    const pdfFiles: File[] = []; // PDF → navegador (pdf.js)
 
     for (const f of Array.from(files)) {
       const ext = extOf(f.name);
@@ -340,6 +341,12 @@ export default function Home() {
         } catch {
           toast.error(`No se pudo leer: ${f.name}`);
         }
+      } else if (ext === "pdf" || f.type === "application/pdf") {
+        if (f.size > 25 * 1024 * 1024) {
+          toast.error(`PDF muy grande (máx. 25 MB): ${f.name}`);
+          continue;
+        }
+        pdfFiles.push(f);
       } else if (ACCEPTED_DOC_EXT.includes(ext)) {
         if (f.size > 12 * 1024 * 1024) {
           toast.error(`Archivo muy grande (máx. 12 MB): ${f.name}`);
@@ -356,8 +363,110 @@ export default function Home() {
     if (imgParts.length) {
       setAttachments((prev) => [...prev, ...imgParts].slice(0, 6));
     }
-    if (docFiles.length) {
-      await extractDocs(docFiles);
+    if (pdfFiles.length) await handlePdfs(pdfFiles);
+    if (docFiles.length) await extractDocs(docFiles);
+  }
+
+  // PDF en el navegador: si tiene texto seleccionable, se extrae; si es de
+  // diseño/escaneado (sin texto), se rasterizan sus páginas a imagen para que
+  // las lea un modelo con visión. Todo local — sin depender del servidor.
+  async function pdfToParts(
+    file: File
+  ): Promise<{ docs: DocPart[]; images: ImagePart[] }> {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.min.mjs",
+      import.meta.url
+    ).toString();
+
+    const data = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data }).promise;
+
+    // 1) Intentar texto seleccionable.
+    let text = "";
+    const scanPages = Math.min(doc.numPages, 40);
+    for (let p = 1; p <= scanPages; p++) {
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      text +=
+        tc.items
+          .map((it) => ("str" in it ? (it as { str: string }).str : ""))
+          .join(" ") + "\n";
+    }
+    text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+
+    if (text.length >= 80) {
+      const truncated = text.length > 60_000;
+      return {
+        docs: [
+          {
+            name: file.name,
+            text: truncated ? text.slice(0, 60_000) : text,
+            chars: text.length,
+            truncated,
+          },
+        ],
+        images: [],
+      };
+    }
+
+    // 2) Sin texto → rasterizar páginas (máx. 6) a JPEG.
+    const images: ImagePart[] = [];
+    const renderPages = Math.min(doc.numPages, 6);
+    for (let p = 1; p <= renderPages; p++) {
+      const page = await doc.getPage(p);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      images.push({ mediaType: "image/jpeg", data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+    }
+    return { docs: [], images };
+  }
+
+  async function handlePdfs(files: File[]) {
+    setExtracting(true);
+    try {
+      const newDocs: DocPart[] = [];
+      const newImgs: ImagePart[] = [];
+      let anyImage = false;
+      for (const f of files) {
+        try {
+          const { docs: d, images: im } = await pdfToParts(f);
+          newDocs.push(...d);
+          newImgs.push(...im);
+          if (im.length) anyImage = true;
+          if (d[0]?.truncated) {
+            toast.info(`${f.name}: PDF largo, se analizará el inicio.`);
+          }
+        } catch {
+          toast.error(`No se pudo leer el PDF: ${f.name}`);
+        }
+      }
+      if (newImgs.length) {
+        setAttachments((prev) => [...prev, ...newImgs].slice(0, 6));
+      }
+      if (newDocs.length) {
+        setDocs((prev) => [...prev, ...newDocs].slice(0, 6));
+      }
+      if (newDocs.length || newImgs.length) {
+        toast.success(
+          anyImage
+            ? "PDF sin texto: lo convertí a imágenes para analizarlo."
+            : "PDF listo para analizar."
+        );
+        if (anyImage && !selectedModel.vision) {
+          toast.info(
+            "Este PDF es de diseño (imágenes). Cambia a un modelo con visión (Claude, Gemini, GPT o Gemma) para que lo lea."
+          );
+        }
+      }
+    } finally {
+      setExtracting(false);
     }
   }
 
@@ -374,18 +483,12 @@ export default function Home() {
         return;
       }
       const okDocs: DocPart[] = [];
-      const okImgs: ImagePart[] = [];
-      let pdfAsImage = false;
       for (const r of data.files ?? []) {
         if (r.error) {
           toast.error(`${r.name}: ${r.error}`);
           continue;
         }
-        if (r.kind === "image" && Array.isArray(r.images) && r.images.length) {
-          // PDF de diseño/escaneado convertido a imágenes (se leen con visión).
-          okImgs.push(...r.images);
-          pdfAsImage = true;
-        } else if (r.text) {
+        if (r.text) {
           okDocs.push({
             name: r.name,
             text: r.text,
@@ -397,25 +500,13 @@ export default function Home() {
           }
         }
       }
-      if (okImgs.length) {
-        setAttachments((prev) => [...prev, ...okImgs].slice(0, 6));
-      }
       if (okDocs.length) {
         setDocs((prev) => [...prev, ...okDocs].slice(0, 6));
-      }
-      if (okDocs.length || okImgs.length) {
         toast.success(
-          pdfAsImage
-            ? "PDF sin texto: lo convertí a imágenes para analizarlo."
-            : okDocs.length === 1
+          okDocs.length === 1
             ? `Archivo listo: ${okDocs[0].name}`
             : `${okDocs.length} archivos listos para analizar.`
         );
-        if (pdfAsImage && !selectedModel.vision) {
-          toast.info(
-            "Este PDF es de diseño (imágenes). Cambia a un modelo con visión (Claude, Gemini, GPT o Gemma) para que lo lea."
-          );
-        }
       }
     } catch {
       toast.error("Error al subir los archivos.");
