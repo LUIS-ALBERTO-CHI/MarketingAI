@@ -138,7 +138,7 @@ async function streamAnthropic(
     const client = await resolveAnthropicClient();
     const claudeStream = client.messages.stream({
       model,
-      max_tokens: 4096,
+      max_tokens: 8192,
       ...(system ? { system } : {}),
       ...(tools ? { tools: tools as never } : {}),
       messages: apiMessages as never,
@@ -263,7 +263,7 @@ async function streamOpenAICompatible(
         model,
         messages: oaMessages,
         stream: true,
-        max_tokens: 4096,
+        max_tokens: 8192,
       }),
     });
   } catch (err) {
@@ -281,13 +281,24 @@ async function streamOpenAICompatible(
 
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
-    controller.enqueue(
-      encoder.encode(
-        `\n\n**[Error del modelo ${res.status}]** ${
-          detail.slice(0, 400) || "No se pudo generar la respuesta."
-        }`
-      )
-    );
+    let friendly = "";
+    if (res.status === 402) {
+      friendly =
+        `\n\n**[Error del modelo — sin saldo]** Este modelo (${cfg.providerLabel}) es de pago y la cuenta no tiene créditos suficientes. ` +
+        `Agrega saldo o elige un modelo gratis.`;
+    } else if (res.status === 429) {
+      friendly =
+        `\n\n**[Error del modelo — saturado]** El modelo está recibiendo demasiadas peticiones (límite temporal). ` +
+        `Espera unos segundos o prueba con otro modelo.`;
+    } else if (res.status === 401 || res.status === 403) {
+      friendly =
+        `\n\n**[Error de autenticación]** La clave de ${cfg.providerLabel} no es válida o no tiene permiso para este modelo.`;
+    } else {
+      friendly = `\n\n**[Error del modelo ${res.status}]** ${
+        detail.slice(0, 300) || "No se pudo generar la respuesta."
+      }`;
+    }
+    controller.enqueue(encoder.encode(friendly));
     return;
   }
 

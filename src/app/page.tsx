@@ -23,6 +23,7 @@ import {
   FileText,
   FileSpreadsheet,
   UploadCloud,
+  Download,
 } from "lucide-react";
 import {
   House,
@@ -69,7 +70,9 @@ import {
   loadActiveAccountId,
   saveActiveAccountId,
   accountHasLinks,
-  accountSystemSuffix,
+  accountHasContext,
+  accountBrandBlock,
+  accountWebBlock,
 } from "@/lib/accounts";
 
 // Iconos de navegación/sección (Phosphor), redondeados y minimalistas.
@@ -97,6 +100,75 @@ function AssistantMessage({ content }: { content: string }) {
         <GeneratedImages prompts={prompts} />
       )}
     </>
+  );
+}
+
+// Acciones para respuestas con tabla: copiar el Copy de cada post y descargar CSV.
+function MessageActions({ content }: { content: string }) {
+  const tables = useMemo(() => parseMarkdownTables(content), [content]);
+  if (!tables.length) return null;
+  const t = tables[0];
+  const copyIdx = t.headers.findIndex((h) => /copy/i.test(h));
+  const titleIdx = t.headers.findIndex((h) =>
+    /(post|tema|t[íi]tulo|d[íi]a)/i.test(h)
+  );
+
+  function download() {
+    try {
+      const blob = new Blob([tableToCsv(t)], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "posts.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("CSV descargado");
+    } catch {
+      toast.error("No se pudo descargar el CSV.");
+    }
+  }
+  async function copyRow(r: string[], idx: number) {
+    const text =
+      copyIdx >= 0 ? cellToText(r[copyIdx] ?? "") : r.map(cellToText).join("\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`Copiado: post ${idx + 1}`);
+    } catch {
+      toast.error("No se pudo copiar.");
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+      {copyIdx >= 0 && (
+        <>
+          <span className="mr-1 text-xs font-medium text-muted">
+            Copiar copy:
+          </span>
+          {t.rows.map((r, idx) => {
+            const raw =
+              titleIdx >= 0 ? cellToText(r[titleIdx] ?? "").split("\n")[0] : "";
+            const label = raw ? raw.slice(0, 24) : `Post ${idx + 1}`;
+            return (
+              <button
+                key={idx}
+                onClick={() => copyRow(r, idx)}
+                title={`Copiar el copy del post ${idx + 1}`}
+                className="flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground/80 transition hover:bg-surface-2 hover:text-foreground"
+              >
+                <Copy className="h-3 w-3" /> {idx + 1}. {label}
+              </button>
+            );
+          })}
+        </>
+      )}
+      <button
+        onClick={download}
+        className="ml-auto flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground/80 transition hover:bg-surface-2 hover:text-foreground"
+      >
+        <Download className="h-3.5 w-3.5" /> Descargar CSV
+      </button>
+    </div>
   );
 }
 
@@ -135,6 +207,85 @@ const FILE_ACCEPT_ATTR =
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+}
+
+// ---------- Relevo automático de modelo cuando el elegido falla ----------
+const FALLBACK_PREF = [
+  "gemini-flash-latest",
+  "claude-opus-4-8",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openai/gpt-oss-20b:free",
+  "gemini-pro-latest",
+];
+
+function isErrorText(s: string): boolean {
+  const t = s.trimStart();
+  return (
+    t.startsWith("**[Error") || t.startsWith("[Error") || t.startsWith("**[Falta")
+  );
+}
+
+function pickFallbackModel(tried: string[], needVision: boolean): string | null {
+  for (const id of FALLBACK_PREF) {
+    if (tried.includes(id)) continue;
+    const m = MODELS.find((x) => x.id === id);
+    if (!m) continue;
+    if (needVision && !m.vision) continue;
+    return id;
+  }
+  return null;
+}
+
+// ---------- Tablas Markdown: parseo para copiar/exportar posts ----------
+type ParsedTable = { headers: string[]; rows: string[][] };
+
+function splitRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  return s.split("|").map((c) => c.trim());
+}
+
+function parseMarkdownTables(md: string): ParsedTable[] {
+  const lines = md.split("\n");
+  const tables: ParsedTable[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const header = lines[i];
+    const sep = lines[i + 1];
+    const isHeader = header && header.includes("|") && header.trim().length > 0;
+    const isSep = sep && /^[\s:|-]+$/.test(sep) && sep.includes("-") && sep.includes("|");
+    if (isHeader && isSep) {
+      const headers = splitRow(header);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim().length > 0) {
+        rows.push(splitRow(lines[i]));
+        i++;
+      }
+      if (rows.length) tables.push({ headers, rows });
+    } else {
+      i++;
+    }
+  }
+  return tables;
+}
+
+// Limpia una celda para copiar como texto plano (para portapapeles).
+function cellToText(cell: string): string {
+  return cell
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+    .trim();
+}
+
+function tableToCsv(t: ParsedTable): string {
+  const esc = (s: string) =>
+    '"' + s.replace(/<br\s*\/?>/gi, "\n").replace(/"/g, '""') + '"';
+  const lines = [t.headers.map(esc).join(",")];
+  for (const r of t.rows) lines.push(r.map(esc).join(","));
+  return "﻿" + lines.join("\r\n"); // BOM para que Excel respete UTF-8
 }
 
 function fileToImagePart(file: File): Promise<ImagePart> {
@@ -597,6 +748,9 @@ export default function Home() {
       name,
       links,
       notes: editingAccount.notes?.trim() || undefined,
+      contact: editingAccount.contact?.trim() || undefined,
+      colors: editingAccount.colors?.trim() || undefined,
+      tone: editingAccount.tone?.trim() || undefined,
     };
     setAccounts((prev) => {
       const next = prev.some((a) => a.id === acc.id)
@@ -658,8 +812,14 @@ export default function Home() {
     toolName: string,
     convId: string,
     synthetic: boolean,
-    web = false
+    web = false,
+    opts?: { modelId?: string; tried?: string[] }
   ) {
+    const useModel = opts?.modelId ?? modelId;
+    const tried = opts?.tried ?? [];
+    const needVision = baseMsgs.some(
+      (m) => m.role === "user" && !!m.images && m.images.length > 0
+    );
     setLoading(true);
     setMessages([...baseMsgs, { role: "assistant", content: "" }]);
     let acc = "";
@@ -667,7 +827,7 @@ export default function Home() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ system, messages: baseMsgs, web, model: modelId }),
+        body: JSON.stringify({ system, messages: baseMsgs, web, model: useModel }),
       });
       if (!res.ok || !res.body) {
         const d = await res.json().catch(() => ({}));
@@ -697,7 +857,24 @@ export default function Home() {
       if (rafId) cancelAnimationFrame(rafId);
       setMessages([...baseMsgs, { role: "assistant", content: acc }]);
       bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
-      if (acc && !acc.startsWith("**[Error")) {
+
+      // Relevo automático: si el modelo devolvió un error, probamos con otro.
+      if (isErrorText(acc)) {
+        const next = pickFallbackModel([...tried, useModel], needVision);
+        if (next) {
+          const failed = getModel(useModel).label;
+          const alt = getModel(next);
+          toast.message(
+            `"${failed}" no está disponible ahora. Probando con "${alt.label}"…`
+          );
+          return await runTurn(system, baseMsgs, toolId, toolName, convId, synthetic, web && alt.web, {
+            modelId: next,
+            tried: [...tried, useModel],
+          });
+        }
+      }
+
+      if (acc && !isErrorText(acc)) {
         const finalMsgs: Msg[] = [...baseMsgs, { role: "assistant", content: acc }];
         const firstUser = baseMsgs.find((m) => m.role === "user");
         const title =
@@ -747,11 +924,12 @@ export default function Home() {
     }
 
     let system = systemFor(t);
-    if (accountHasLinks(activeAccount)) {
-      system += accountSystemSuffix(activeAccount);
+    if (accountHasContext(activeAccount)) system += accountBrandBlock(activeAccount);
+    web = web && selectedModel.web; // las herramientas web solo existen en Claude
+    if (accountHasLinks(activeAccount) && selectedModel.web) {
+      system += accountWebBlock(activeAccount);
       web = true;
     }
-    web = web && selectedModel.web; // las herramientas web solo existen en Claude
 
     // Adjuntos del formulario: imágenes (visión) y documentos (texto/PDF).
     const visionOk = selectedModel.vision;
@@ -804,10 +982,9 @@ export default function Home() {
     if (visionOk) setAttachments([]);
     setDocs([]);
     let system = systemFor(t);
-    if (accountHasLinks(activeAccount)) {
-      system += accountSystemSuffix(activeAccount);
-    }
+    if (accountHasContext(activeAccount)) system += accountBrandBlock(activeAccount);
     const web = accountHasLinks(activeAccount) && selectedModel.web;
+    if (web) system += accountWebBlock(activeAccount);
     runTurn(system, base, t.id, t.name, convId, syntheticFirst, web);
   }
 
@@ -828,10 +1005,9 @@ export default function Home() {
     setCurrentConvId(convId);
     setSyntheticFirst(false);
     let system = systemFor(FREE_TOOL);
-    if (accountHasLinks(activeAccount)) {
-      system += accountSystemSuffix(activeAccount);
-    }
+    if (accountHasContext(activeAccount)) system += accountBrandBlock(activeAccount);
     const web = accountHasLinks(activeAccount) && selectedModel.web;
+    if (web) system += accountWebBlock(activeAccount);
     const userMsg: Msg = {
       role: "user",
       content:
@@ -1199,6 +1375,47 @@ export default function Home() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">
+              Contacto (opcional)
+            </label>
+            <Input
+              value={editingAccount.contact ?? ""}
+              onChange={(e) =>
+                setEditingAccount({ ...editingAccount, contact: e.target.value })
+              }
+              placeholder="📲 999 123 4567 · 📍 Centro, Mérida"
+            />
+            <p className="text-xs text-muted">
+              Se incluye en los posts cuando aplique.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Tono (opcional)
+              </label>
+              <Input
+                value={editingAccount.tone ?? ""}
+                onChange={(e) =>
+                  setEditingAccount({ ...editingAccount, tone: e.target.value })
+                }
+                placeholder="Cercano, premium…"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Colores (opcional)
+              </label>
+              <Input
+                value={editingAccount.colors ?? ""}
+                onChange={(e) =>
+                  setEditingAccount({ ...editingAccount, colors: e.target.value })
+                }
+                placeholder="#0A66C2, azul y blanco"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
               Notas (opcional)
             </label>
             <Textarea
@@ -1207,7 +1424,7 @@ export default function Home() {
               onChange={(e) =>
                 setEditingAccount({ ...editingAccount, notes: e.target.value })
               }
-              placeholder="Tono, público, temas a evitar…"
+              placeholder="Público, temas a evitar…"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -1758,7 +1975,10 @@ export default function Home() {
                                   <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary align-middle" />
                                 </div>
                               ) : (
-                                <AssistantMessage content={m.content} />
+                                <>
+                                  <AssistantMessage content={m.content} />
+                                  <MessageActions content={m.content} />
+                                </>
                               )}
                             </div>
                           );

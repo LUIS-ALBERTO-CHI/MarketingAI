@@ -27,6 +27,10 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
+          // Los enlaces (p. ej. inspiración de Pinterest) abren en pestaña nueva.
+          a: ({ ...props }) => (
+            <a target="_blank" rel="noopener noreferrer" {...props} />
+          ),
           // Tablas anchas: scroll horizontal sin romper el layout de la página.
           table: ({ ...props }) => (
             <div className="my-4 overflow-x-auto rounded-xl border border-border">
