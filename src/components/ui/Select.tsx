@@ -67,6 +67,7 @@ export interface RichOption {
   label: string;
   hint?: string;
   free?: boolean;
+  vision?: boolean;
 }
 
 // Selector con etiqueta "gratis" y descripción por opción (para elegir modelo).
@@ -105,11 +106,20 @@ export function ModelSelect({
                 className="flex cursor-pointer select-none items-start justify-between gap-2 rounded-lg px-3 py-2 text-sm text-foreground outline-none transition data-[highlighted]:bg-surface-2 data-[state=checked]:text-primary"
               >
                 <span className="flex min-w-0 flex-col">
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex flex-wrap items-center gap-1.5">
                     <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
-                    {o.free && (
+                    {o.free ? (
                       <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
                         Gratis
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                        De pago
+                      </span>
+                    )}
+                    {o.vision && (
+                      <span className="rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-600">
+                        👁 Visión
                       </span>
                     )}
                   </span>

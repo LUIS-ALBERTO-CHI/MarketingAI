@@ -24,6 +24,8 @@ import {
   FileSpreadsheet,
   UploadCloud,
   Download,
+  LogIn,
+  LogOut,
 } from "lucide-react";
 import {
   House,
@@ -74,6 +76,17 @@ import {
   accountBrandBlock,
   accountWebBlock,
 } from "@/lib/accounts";
+import { firebaseReady } from "@/lib/firebase";
+import {
+  type CloudUser,
+  onUserChange,
+  signInWithGoogle,
+  signOutUser,
+  pullCloud,
+  subscribeCloud,
+  pushConversations,
+  pushAccounts,
+} from "@/lib/cloud";
 
 // Iconos de navegación/sección (Phosphor), redondeados y minimalistas.
 // Por defecto son de línea; se rellenan ("fill") solo cuando están activos,
@@ -103,74 +116,118 @@ function AssistantMessage({ content }: { content: string }) {
   );
 }
 
-// Acciones para respuestas con tabla: copiar el Copy de cada post y descargar CSV.
-function MessageActions({ content }: { content: string }) {
-  const tables = useMemo(() => parseMarkdownTables(content), [content]);
-  if (!tables.length) return null;
-  const t = tables[0];
-  const copyIdx = t.headers.findIndex((h) => /copy/i.test(h));
-  const titleIdx = t.headers.findIndex((h) =>
+// Copia texto al portapapeles con feedback.
+async function copyText(text: string, label = "Copiado") {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(label);
+  } catch {
+    toast.error("No se pudo copiar.");
+  }
+}
+
+// Descarga una tabla como CSV (UTF-8 con BOM para Excel).
+function downloadCsv(t: ParsedTable, name = "posts.csv") {
+  try {
+    const blob = new Blob([tableToCsv(t)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("CSV descargado");
+  } catch {
+    toast.error("No se pudo descargar el CSV.");
+  }
+}
+
+// Renderiza una tabla de posts como tarjetas legibles (copy, hashtags, inspo).
+function PostCards({ table }: { table: ParsedTable }) {
+  const copyIdx = table.headers.findIndex((h) => /copy/i.test(h));
+  const titleIdx = table.headers.findIndex((h) =>
     /(post|tema|t[íi]tulo|d[íi]a)/i.test(h)
   );
-
-  function download() {
-    try {
-      const blob = new Blob([tableToCsv(t)], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "posts.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success("CSV descargado");
-    } catch {
-      toast.error("No se pudo descargar el CSV.");
-    }
-  }
-  async function copyRow(r: string[], idx: number) {
-    const text =
-      copyIdx >= 0 ? cellToText(r[copyIdx] ?? "") : r.map(cellToText).join("\n\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(`Copiado: post ${idx + 1}`);
-    } catch {
-      toast.error("No se pudo copiar.");
-    }
-  }
+  const inspoIdx = table.headers.findIndex((h) => /insp/i.test(h));
+  const tagIdx = table.headers.findIndex((h) => /(hashtag|etiqueta)/i.test(h));
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
-      {copyIdx >= 0 && (
-        <>
-          <span className="mr-1 text-xs font-medium text-muted">
-            Copiar copy:
-          </span>
-          {t.rows.map((r, idx) => {
-            const raw =
-              titleIdx >= 0 ? cellToText(r[titleIdx] ?? "").split("\n")[0] : "";
-            const label = raw ? raw.slice(0, 24) : `Post ${idx + 1}`;
-            return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {table.rows.map((r, i) => {
+        const titleFull = titleIdx >= 0 ? cellToText(r[titleIdx] ?? "") : `Post ${i + 1}`;
+        const [titleHead, ...titleRest] = titleFull.split("\n");
+        const copy = copyIdx >= 0 ? cellToText(r[copyIdx] ?? "") : "";
+        const tags =
+          tagIdx >= 0
+            ? (r[tagIdx] ?? "").split(/\s+/).filter((x) => x.startsWith("#"))
+            : [];
+        const inspo =
+          inspoIdx >= 0
+            ? (r[inspoIdx] ?? "").match(/\((https?:[^)]+)\)/)?.[1]
+            : undefined;
+        return (
+          <div
+            key={i}
+            className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-3.5 shadow-soft"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h4 className="font-heading text-sm font-bold leading-snug text-foreground">
+                {titleHead}
+              </h4>
               <button
-                key={idx}
-                onClick={() => copyRow(r, idx)}
-                title={`Copiar el copy del post ${idx + 1}`}
-                className="flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground/80 transition hover:bg-surface-2 hover:text-foreground"
+                onClick={() => copyText(copy || titleFull, `Copiado: post ${i + 1}`)}
+                title="Copiar el copy de este post"
+                className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface-2 px-2 py-1 text-xs text-foreground/80 transition hover:text-primary"
               >
-                <Copy className="h-3 w-3" /> {idx + 1}. {label}
+                <Copy className="h-3 w-3" /> Copiar
               </button>
-            );
-          })}
-        </>
-      )}
-      <button
-        onClick={download}
-        className="ml-auto flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground/80 transition hover:bg-surface-2 hover:text-foreground"
-      >
-        <Download className="h-3.5 w-3.5" /> Descargar CSV
-      </button>
+            </div>
+            {titleRest.length > 0 && (
+              <p className="whitespace-pre-line text-xs text-muted">
+                {titleRest.join("\n")}
+              </p>
+            )}
+            {copy && (
+              <p className="whitespace-pre-line border-t border-border/60 pt-2 text-sm text-foreground/90">
+                {copy}
+              </p>
+            )}
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {tags.map((tg, k) => (
+                  <span
+                    key={k}
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary"
+                  >
+                    {tg}
+                  </span>
+                ))}
+              </div>
+            )}
+            {inspo && (
+              <a
+                href={inspo}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-primary hover:text-accent"
+              >
+                🔗 Ver inspiración
+              </a>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
+
+// Ejemplos de un clic para el estado inicial (onboarding).
+const EXAMPLE_PROMPTS = [
+  "Posts para una cafetería de especialidad en Mérida",
+  "Calendario de marzo para una veterinaria",
+  "Promo de inscripciones para carrera de enfermería",
+  "3 posts para una tienda de motos todoterreno",
+];
 
 const CHIPS = [
   "bg-amber-500/10 text-amber-500",
@@ -207,6 +264,23 @@ const FILE_ACCEPT_ATTR =
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+}
+
+// Iniciales para el avatar (de nombre o correo).
+function initialsOf(s: string | null): string {
+  if (!s) return "U";
+  const parts = s.split(/[\s@._-]+/).filter(Boolean);
+  return (
+    (parts[0]?.[0] ?? "U").toUpperCase() + (parts[1]?.[0] ?? "").toUpperCase()
+  );
+}
+
+// Fusiona listas por id (la nube gana en conflictos) para el merge local↔nube.
+function mergeById<T extends { id: string }>(local: T[], cloud: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const x of local) map.set(x.id, x);
+  for (const x of cloud) map.set(x.id, x);
+  return Array.from(map.values());
 }
 
 // ---------- Relevo automático de modelo cuando el elegido falla ----------
@@ -351,6 +425,20 @@ export default function Home() {
   const [docs, setDocs] = useState<DocPart[]>([]);
   const [extracting, setExtracting] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [cardView, setCardView] = useState(true); // tarjetas vs tabla
+  const [user, setUser] = useState<CloudUser | null>(null);
+  const userRef = useRef<CloudUser | null>(null);
+  const lastConvJson = useRef("");
+  const lastAccJson = useRef("");
+  const lastTurnRef = useRef<null | {
+    system: string;
+    baseMsgs: Msg[];
+    toolId: string;
+    toolName: string;
+    convId: string;
+    synthetic: boolean;
+    web: boolean;
+  }>(null);
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
   const [isMac, setIsMac] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -389,6 +477,65 @@ export default function Home() {
     const t = params.get("tool");
     if (t && getTool(t)) setSelectedId(t);
   }, []);
+
+  // Sesión en la nube (Firebase). Al iniciar sesión, fusiona local + nube y sube.
+  useEffect(() => {
+    const unsub = onUserChange(async (u) => {
+      userRef.current = u;
+      setUser(u);
+      if (!u) return;
+      try {
+        const cloud = await pullCloud(u.uid);
+        setConversations((prev) => {
+          const merged = mergeById(prev, cloud.conversations as Conversation[])
+            .sort((a, b) => (a.id < b.id ? 1 : -1))
+            .slice(0, 20);
+          lastConvJson.current = JSON.stringify(merged);
+          try {
+            localStorage.setItem("conversations", JSON.stringify(merged));
+          } catch {}
+          pushConversations(u.uid, merged);
+          return merged;
+        });
+        setAccounts((prev) => {
+          const merged = mergeById(prev, cloud.accounts as Account[]);
+          lastAccJson.current = JSON.stringify(merged);
+          saveAccounts(merged);
+          pushAccounts(u.uid, merged);
+          return merged;
+        });
+        toast.success(`Sesión iniciada: ${u.name || u.email}`);
+      } catch {
+        toast.error("No se pudo sincronizar con la nube.");
+      }
+    });
+    return unsub;
+  }, []);
+
+  // Sincronización en tiempo real entre dispositivos.
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeCloud(user.uid, (data) => {
+      const cj = JSON.stringify(data.conversations);
+      if (cj !== lastConvJson.current) {
+        lastConvJson.current = cj;
+        setConversations(data.conversations as Conversation[]);
+        try {
+          localStorage.setItem(
+            "conversations",
+            JSON.stringify((data.conversations as Conversation[]).slice(0, 20))
+          );
+        } catch {}
+      }
+      const aj = JSON.stringify(data.accounts);
+      if (aj !== lastAccJson.current) {
+        lastAccJson.current = aj;
+        setAccounts(data.accounts as Account[]);
+        saveAccounts(data.accounts as Account[]);
+      }
+    });
+    return unsub;
+  }, [user]);
 
   const activeAccount = useMemo(
     () => accounts.find((a) => a.id === activeAccountId) ?? null,
@@ -449,9 +596,23 @@ export default function Home() {
   }
 
   function persist(list: Conversation[]) {
+    const trimmed = list.slice(0, 20);
     try {
-      localStorage.setItem("conversations", JSON.stringify(list.slice(0, 20)));
+      localStorage.setItem("conversations", JSON.stringify(trimmed));
     } catch {}
+    const u = userRef.current;
+    if (u) {
+      lastConvJson.current = JSON.stringify(trimmed);
+      pushConversations(u.uid, trimmed);
+    }
+  }
+  function syncAccounts(list: Account[]) {
+    saveAccounts(list);
+    const u = userRef.current;
+    if (u) {
+      lastAccJson.current = JSON.stringify(list);
+      pushAccounts(u.uid, list);
+    }
   }
   function upsertConversation(conv: Conversation) {
     setConversations((prev) => {
@@ -733,6 +894,21 @@ export default function Home() {
     }
   }
 
+  // ---------- Sesión en la nube ----------
+  async function doSignIn() {
+    try {
+      await signInWithGoogle();
+    } catch {
+      toast.error("No se pudo iniciar sesión con Google.");
+    }
+  }
+  async function doSignOut() {
+    await signOutUser();
+    userRef.current = null;
+    setUser(null);
+    toast.message("Sesión cerrada (los datos locales se conservan).");
+  }
+
   // ---------- Cuentas / Proyectos ----------
   function chooseActiveAccount(id: string | null) {
     setActiveAccountId(id);
@@ -756,7 +932,7 @@ export default function Home() {
       const next = prev.some((a) => a.id === acc.id)
         ? prev.map((a) => (a.id === acc.id ? acc : a))
         : [acc, ...prev];
-      saveAccounts(next);
+      syncAccounts(next);
       return next;
     });
     chooseActiveAccount(acc.id);
@@ -765,7 +941,7 @@ export default function Home() {
   function removeAccount(id: string) {
     setAccounts((prev) => {
       const next = prev.filter((a) => a.id !== id);
-      saveAccounts(next);
+      syncAccounts(next);
       return next;
     });
     if (activeAccountId === id) chooseActiveAccount(null);
@@ -820,6 +996,18 @@ export default function Home() {
     const needVision = baseMsgs.some(
       (m) => m.role === "user" && !!m.images && m.images.length > 0
     );
+    // Guardamos la llamada inicial para poder "Regenerar" con el mismo contexto.
+    if (!opts) {
+      lastTurnRef.current = {
+        system,
+        baseMsgs,
+        toolId,
+        toolName,
+        convId,
+        synthetic,
+        web,
+      };
+    }
     setLoading(true);
     setMessages([...baseMsgs, { role: "assistant", content: "" }]);
     let acc = "";
@@ -952,9 +1140,15 @@ export default function Home() {
     runTurn(system, [userMsg], t.id, t.name, convId, true, web);
   }
 
-  function sendFollowup() {
+  function regenerate() {
+    const lt = lastTurnRef.current;
+    if (!lt || loading || extracting) return;
+    runTurn(lt.system, lt.baseMsgs, lt.toolId, lt.toolName, lt.convId, lt.synthetic, lt.web);
+  }
+
+  function sendFollowup(textOverride?: string) {
     if (loading || extracting) return;
-    const text = followup.trim();
+    const text = (textOverride ?? followup).trim();
     const visionOk = selectedModel.vision;
     if (attachments.length && !visionOk) {
       toast.info(
@@ -978,7 +1172,7 @@ export default function Home() {
       ...(docsToSend.length ? { docs: docsToSend } : {}),
     };
     const base: Msg[] = [...messages.filter((m) => m.content), userMsg];
-    setFollowup("");
+    if (!textOverride) setFollowup("");
     if (visionOk) setAttachments([]);
     setDocs([]);
     let system = systemFor(t);
@@ -988,9 +1182,9 @@ export default function Home() {
     runTurn(system, base, t.id, t.name, convId, syntheticFirst, web);
   }
 
-  function submitHomePrompt() {
+  function submitHomePrompt(textOverride?: string) {
     if (loading || extracting) return;
-    const p = inputs.prompt?.trim();
+    const p = (textOverride ?? inputs.prompt)?.trim();
     const visionOk = selectedModel.vision;
     if (attachments.length && !visionOk) {
       toast.info(
@@ -1175,6 +1369,7 @@ export default function Home() {
             label: m.label,
             hint: m.hint,
             free: m.free,
+            vision: m.vision,
           }))}
         />
       </div>
@@ -1204,18 +1399,52 @@ export default function Home() {
         </Button>
       </div>
 
-      <div className="mt-3 flex items-center gap-2.5 px-1">
-        <Avatar>
-          <AvatarFallback className="bg-gradient-to-br from-primary to-violet-500">
-            LC
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">
-            Luis Casanova
-          </p>
-          <p className="truncate text-xs text-muted">luis.casanova@fwa.eu</p>
-        </div>
+      <div className="mt-3 px-1">
+        {firebaseReady && user ? (
+          <div className="flex items-center gap-2.5">
+            <Avatar>
+              <AvatarFallback className="bg-gradient-to-br from-primary to-violet-500 text-xs">
+                {initialsOf(user.name || user.email)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-foreground">
+                {user.name || "Usuario"}
+              </p>
+              <p className="truncate text-xs text-muted">{user.email}</p>
+            </div>
+            <button
+              onClick={doSignOut}
+              title="Cerrar sesión"
+              className="shrink-0 rounded-lg p-2 text-muted transition hover:bg-surface-2 hover:text-rose-500"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        ) : firebaseReady ? (
+          <button
+            onClick={doSignIn}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-medium text-foreground transition hover:border-primary/40 hover:bg-surface-2"
+          >
+            <LogIn className="h-4 w-4" /> Iniciar sesión con Google
+          </button>
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <Avatar>
+              <AvatarFallback className="bg-gradient-to-br from-primary to-violet-500">
+                LC
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">
+                Invitado
+              </p>
+              <p className="truncate text-xs text-muted">
+                Sin sincronizar (local)
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1783,7 +2012,7 @@ export default function Home() {
                         <TooltipTrigger asChild>
                           <Button
                             size="icon-sm"
-                            onClick={submitHomePrompt}
+                            onClick={() => submitHomePrompt()}
                             disabled={
                               (!inputs.prompt?.trim() &&
                                 attachments.length === 0 &&
@@ -1804,6 +2033,20 @@ export default function Home() {
                     </div>
                   </div>
                 </Card>
+
+                {/* Ejemplos rápidos: rellenan y generan al instante */}
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {EXAMPLE_PROMPTS.map((ex) => (
+                    <button
+                      key={ex}
+                      onClick={() => submitHomePrompt(ex)}
+                      disabled={loading || extracting}
+                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted transition hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : (
               /* ---------- HERRAMIENTA ---------- */
@@ -1975,10 +2218,87 @@ export default function Home() {
                                   <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary align-middle" />
                                 </div>
                               ) : (
-                                <>
-                                  <AssistantMessage content={m.content} />
-                                  <MessageActions content={m.content} />
-                                </>
+                                (() => {
+                                  const tables = parseMarkdownTables(m.content);
+                                  const postsTable = tables.find((t) =>
+                                    t.headers.some((h) => /copy/i.test(h))
+                                  );
+                                  const isLast = i === visibleMessages.length - 1;
+                                  const btn =
+                                    "flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground/80 transition hover:bg-surface-2 hover:text-foreground";
+                                  return (
+                                    <>
+                                      {postsTable && cardView ? (
+                                        <PostCards table={postsTable} />
+                                      ) : (
+                                        <AssistantMessage content={m.content} />
+                                      )}
+                                      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+                                        {postsTable && (
+                                          <div className="mr-1 inline-flex rounded-lg border border-border p-0.5">
+                                            <button
+                                              onClick={() => setCardView(true)}
+                                              className={`rounded-md px-2 py-0.5 text-xs transition ${cardView ? "bg-primary/10 font-semibold text-primary" : "text-muted hover:text-foreground"}`}
+                                            >
+                                              Tarjetas
+                                            </button>
+                                            <button
+                                              onClick={() => setCardView(false)}
+                                              className={`rounded-md px-2 py-0.5 text-xs transition ${!cardView ? "bg-primary/10 font-semibold text-primary" : "text-muted hover:text-foreground"}`}
+                                            >
+                                              Tabla
+                                            </button>
+                                          </div>
+                                        )}
+                                        <button
+                                          onClick={() => copyText(m.content, "Respuesta copiada")}
+                                          className={btn}
+                                        >
+                                          <Copy className="h-3 w-3" /> Copiar todo
+                                        </button>
+                                        {postsTable && (
+                                          <button onClick={() => downloadCsv(postsTable)} className={btn}>
+                                            <Download className="h-3.5 w-3.5" /> CSV
+                                          </button>
+                                        )}
+                                        {isLast && (
+                                          <button onClick={regenerate} className={btn}>
+                                            <RotateCcw className="h-3.5 w-3.5" /> Regenerar
+                                          </button>
+                                        )}
+                                        {isLast && postsTable && (
+                                          <>
+                                            <span className="ml-auto text-xs text-muted">Ajustar:</span>
+                                            <button
+                                              onClick={() =>
+                                                sendFollowup("Hazlos más cortos y directos, mismo formato de tabla.")
+                                              }
+                                              className={btn}
+                                            >
+                                              Más corto
+                                            </button>
+                                            <button
+                                              onClick={() =>
+                                                sendFollowup("Hazlos más aspiracionales y de estilo de vida, mismo formato de tabla.")
+                                              }
+                                              className={btn}
+                                            >
+                                              Más aspiracional
+                                            </button>
+                                            <button
+                                              onClick={() =>
+                                                sendFollowup("Dame otras 3 ideas distintas sobre el mismo tema, mismo formato de tabla.")
+                                              }
+                                              className={btn}
+                                            >
+                                              Otras 3
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </>
+                                  );
+                                })()
                               )}
                             </div>
                           );
@@ -2032,7 +2352,7 @@ export default function Home() {
                         />
                         <Button
                           size="icon"
-                          onClick={sendFollowup}
+                          onClick={() => sendFollowup()}
                           disabled={
                             (!followup.trim() &&
                               attachments.length === 0 &&
