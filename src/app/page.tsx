@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect, type DragEvent } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -20,6 +20,9 @@ import {
   Pencil,
   Trash2,
   Check,
+  FileText,
+  FileSpreadsheet,
+  UploadCloud,
 } from "lucide-react";
 import {
   House,
@@ -115,13 +118,24 @@ const chipFor = (id: string) => {
 };
 
 type ImagePart = { mediaType: string; data: string };
+type DocPart = { name: string; text: string; chars?: number; truncated?: boolean };
 type Msg = {
   role: "user" | "assistant";
   content: string;
   images?: ImagePart[];
+  docs?: DocPart[];
 };
 
 const ACCEPTED_IMG = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+// Extensiones de documentos que se analizan por texto (todos los modelos).
+const ACCEPTED_DOC_EXT = ["pdf", "docx", "xlsx", "xls", "csv", "txt", "md"];
+const FILE_ACCEPT_ATTR =
+  "image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,.xlsx,.xls,.csv,.txt,.md";
+
+function extOf(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+}
 
 function fileToImagePart(file: File): Promise<ImagePart> {
   return new Promise((resolve, reject) => {
@@ -183,6 +197,9 @@ export default function Home() {
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [attachments, setAttachments] = useState<ImagePart[]>([]);
+  const [docs, setDocs] = useState<DocPart[]>([]);
+  const [extracting, setExtracting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
   const [isMac, setIsMac] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -305,29 +322,112 @@ export default function Home() {
     persist([]);
   }
 
-  // ---------- Imágenes de referencia (visión) ----------
+  // ---------- Adjuntos: imágenes (visión) y documentos (PDF/Word/Excel) ----------
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const parts: ImagePart[] = [];
+    const imgParts: ImagePart[] = [];
+    const docFiles: File[] = [];
+
     for (const f of Array.from(files)) {
-      if (!ACCEPTED_IMG.includes(f.type)) {
-        toast.error(`Formato no soportado: ${f.name} (usa JPG, PNG, GIF o WebP)`);
-        continue;
-      }
-      if (f.size > 5 * 1024 * 1024) {
-        toast.error(`Imagen muy grande (máx. 5 MB): ${f.name}`);
-        continue;
-      }
-      try {
-        parts.push(await fileToImagePart(f));
-      } catch {
-        toast.error(`No se pudo leer: ${f.name}`);
+      const ext = extOf(f.name);
+      if (ACCEPTED_IMG.includes(f.type)) {
+        if (f.size > 5 * 1024 * 1024) {
+          toast.error(`Imagen muy grande (máx. 5 MB): ${f.name}`);
+          continue;
+        }
+        try {
+          imgParts.push(await fileToImagePart(f));
+        } catch {
+          toast.error(`No se pudo leer: ${f.name}`);
+        }
+      } else if (ACCEPTED_DOC_EXT.includes(ext)) {
+        if (f.size > 12 * 1024 * 1024) {
+          toast.error(`Archivo muy grande (máx. 12 MB): ${f.name}`);
+          continue;
+        }
+        docFiles.push(f);
+      } else {
+        toast.error(
+          `Formato no soportado: ${f.name} (usa imagen, PDF, Word, Excel, CSV o TXT)`
+        );
       }
     }
-    if (parts.length) setAttachments((prev) => [...prev, ...parts].slice(0, 6));
+
+    if (imgParts.length) {
+      setAttachments((prev) => [...prev, ...imgParts].slice(0, 6));
+    }
+    if (docFiles.length) {
+      await extractDocs(docFiles);
+    }
   }
+
+  // Sube los documentos al servidor, que extrae el texto para analizarlo.
+  async function extractDocs(files: File[]) {
+    setExtracting(true);
+    try {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      const res = await fetch("/api/extract", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "No se pudieron leer los archivos.");
+        return;
+      }
+      const ok: DocPart[] = [];
+      for (const r of data.files ?? []) {
+        if (r.error) {
+          toast.error(`${r.name}: ${r.error}`);
+          continue;
+        }
+        ok.push({
+          name: r.name,
+          text: r.text,
+          chars: r.chars,
+          truncated: r.truncated,
+        });
+        if (r.truncated) {
+          toast.info(`${r.name}: archivo largo, se analizará el inicio.`);
+        }
+      }
+      if (ok.length) {
+        setDocs((prev) => [...prev, ...ok].slice(0, 6));
+        toast.success(
+          ok.length === 1
+            ? `Archivo listo: ${ok[0].name}`
+            : `${ok.length} archivos listos para analizar.`
+        );
+      }
+    } catch {
+      toast.error("Error al subir los archivos.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   function removeAttachment(i: number) {
     setAttachments((prev) => prev.filter((_, j) => j !== i));
+  }
+  function removeDoc(i: number) {
+    setDocs((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  // ---------- Arrastrar y soltar archivos ----------
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (e.dataTransfer?.types?.includes("Files")) {
+      e.preventDefault();
+      if (!dragging) setDragging(true);
+    }
+  }
+  function onDragLeave(e: DragEvent<HTMLDivElement>) {
+    // Solo ocultamos cuando el puntero sale de la ventana.
+    if (e.relatedTarget === null) setDragging(false);
+  }
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (e.dataTransfer?.files?.length) {
+      e.preventDefault();
+      handleFiles(e.dataTransfer.files);
+    }
+    setDragging(false);
   }
 
   function chooseModel(id: string) {
@@ -546,7 +646,7 @@ export default function Home() {
   }
 
   function sendFollowup() {
-    if (loading) return;
+    if (loading || extracting) return;
     const text = followup.trim();
     const visionOk = selectedModel.vision;
     if (attachments.length && !visionOk) {
@@ -555,7 +655,8 @@ export default function Home() {
       );
     }
     const imgs = visionOk ? attachments : [];
-    if (!text && imgs.length === 0) return;
+    const docsToSend = docs;
+    if (!text && imgs.length === 0 && docsToSend.length === 0) return;
     const t = getTool(selectedId ?? FREE_TOOL.id) ?? FREE_TOOL;
     const convId = currentConvId ?? newId();
     if (!currentConvId) setCurrentConvId(convId);
@@ -563,12 +664,16 @@ export default function Home() {
       role: "user",
       content:
         text ||
-        "Aquí tienes una imagen de referencia. Analízala y básate en su estilo.",
+        (docsToSend.length
+          ? "Analiza el/los archivo(s) adjunto(s)."
+          : "Aquí tienes una imagen de referencia. Analízala y básate en su estilo."),
       ...(imgs.length ? { images: imgs } : {}),
+      ...(docsToSend.length ? { docs: docsToSend } : {}),
     };
     const base: Msg[] = [...messages.filter((m) => m.content), userMsg];
     setFollowup("");
     if (visionOk) setAttachments([]);
+    setDocs([]);
     let system = systemFor(t);
     if (accountHasLinks(activeAccount)) {
       system += accountSystemSuffix(activeAccount);
@@ -578,7 +683,7 @@ export default function Home() {
   }
 
   function submitHomePrompt() {
-    if (loading) return;
+    if (loading || extracting) return;
     const p = inputs.prompt?.trim();
     const visionOk = selectedModel.vision;
     if (attachments.length && !visionOk) {
@@ -587,7 +692,8 @@ export default function Home() {
       );
     }
     const imgs = visionOk ? attachments : [];
-    if (!p && imgs.length === 0) return;
+    const docsToSend = docs;
+    if (!p && imgs.length === 0 && docsToSend.length === 0) return;
     const convId = newId();
     setSelectedId(FREE_TOOL.id);
     setCurrentConvId(convId);
@@ -601,10 +707,14 @@ export default function Home() {
       role: "user",
       content:
         p ||
-        "Aquí tienes una imagen de referencia. Analízala y básate en su estilo.",
+        (docsToSend.length
+          ? "Analiza el/los archivo(s) adjunto(s)."
+          : "Aquí tienes una imagen de referencia. Analízala y básate en su estilo."),
       ...(imgs.length ? { images: imgs } : {}),
+      ...(docsToSend.length ? { docs: docsToSend } : {}),
     };
     if (visionOk) setAttachments([]);
+    setDocs([]);
     updateField("prompt", "");
     runTurn(
       system,
@@ -1070,11 +1180,18 @@ export default function Home() {
     </>
   );
 
+  const docIcon = (name: string) =>
+    ["xlsx", "xls", "csv"].includes(extOf(name)) ? (
+      <FileSpreadsheet className="h-4 w-4 text-emerald-500" />
+    ) : (
+      <FileText className="h-4 w-4 text-primary" />
+    );
+
   const attachmentStrip =
-    attachments.length > 0 ? (
+    attachments.length > 0 || docs.length > 0 || extracting ? (
       <div className="flex flex-wrap gap-2 px-1 pt-1">
         {attachments.map((img, i) => (
-          <div key={i} className="relative">
+          <div key={`img-${i}`} className="relative">
             <img
               src={`data:${img.mediaType};base64,${img.data}`}
               alt="Adjunto"
@@ -1089,16 +1206,58 @@ export default function Home() {
             </button>
           </div>
         ))}
+        {docs.map((d, i) => (
+          <div
+            key={`doc-${i}`}
+            className="relative flex max-w-[200px] items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-2"
+          >
+            {docIcon(d.name)}
+            <span className="truncate text-xs text-foreground" title={d.name}>
+              {d.name}
+            </span>
+            <button
+              onClick={() => removeDoc(i)}
+              aria-label="Quitar archivo"
+              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-border bg-surface text-muted shadow-soft transition hover:text-rose-500"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+        {extracting && (
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-xs text-muted">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Leyendo archivo…
+          </div>
+        )}
       </div>
     ) : null;
 
   return (
-    <div className="flex h-screen gap-3 bg-background p-2 sm:p-3">
+    <div
+      className="relative flex h-screen gap-3 bg-background p-2 sm:p-3"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {/* Overlay al arrastrar archivos */}
+      {dragging && (
+        <div className="pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-primary/10 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary bg-surface/95 px-10 py-8 shadow-soft">
+            <UploadCloud className="h-10 w-10 text-primary" />
+            <p className="text-base font-semibold text-foreground">
+              Suelta para analizar
+            </p>
+            <p className="text-xs text-muted">
+              Imágenes · PDF · Word · Excel · CSV · TXT
+            </p>
+          </div>
+        </div>
+      )}
       {/* Input de archivos oculto, reutilizado por los cuadros de escritura */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
+        accept={FILE_ACCEPT_ATTR}
         multiple
         className="hidden"
         onChange={(e) => {
@@ -1261,6 +1420,7 @@ export default function Home() {
                     <div className="flex items-center gap-1 text-xs text-muted">
                       <button
                         onClick={() => fileInputRef.current?.click()}
+                        title="Adjuntar imagen, PDF, Word, Excel, CSV o TXT"
                         className="flex items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-surface-2 hover:text-foreground"
                       >
                         <Paperclip className="h-3.5 w-3.5" /> Adjuntar
@@ -1280,8 +1440,10 @@ export default function Home() {
                             onClick={submitHomePrompt}
                             disabled={
                               (!inputs.prompt?.trim() &&
-                                attachments.length === 0) ||
-                              loading
+                                attachments.length === 0 &&
+                                docs.length === 0) ||
+                              loading ||
+                              extracting
                             }
                           >
                             {loading ? (
@@ -1413,6 +1575,24 @@ export default function Home() {
                                     ))}
                                   </div>
                                 )}
+                                {m.docs && m.docs.length > 0 && (
+                                  <div className="flex flex-wrap justify-end gap-1.5">
+                                    {m.docs.map((d, k) => (
+                                      <div
+                                        key={k}
+                                        className="flex max-w-[220px] items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5"
+                                      >
+                                        {docIcon(d.name)}
+                                        <span
+                                          className="truncate text-xs text-foreground"
+                                          title={d.name}
+                                        >
+                                          {d.name}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                                 {m.content && (
                                   <div className="rounded-2xl rounded-br-sm bg-primary/10 px-3.5 py-2 text-sm text-foreground">
                                     {m.content}
@@ -1462,7 +1642,8 @@ export default function Home() {
                           variant="ghost"
                           size="icon"
                           onClick={() => fileInputRef.current?.click()}
-                          aria-label="Adjuntar imagen"
+                          aria-label="Adjuntar archivo (imagen, PDF, Word, Excel)"
+                          title="Adjuntar imagen, PDF, Word, Excel, CSV o TXT"
                           className="shrink-0 text-muted hover:text-foreground"
                         >
                           <Paperclip className="h-4 w-4" />
@@ -1488,8 +1669,11 @@ export default function Home() {
                           size="icon"
                           onClick={sendFollowup}
                           disabled={
-                            (!followup.trim() && attachments.length === 0) ||
-                            loading
+                            (!followup.trim() &&
+                              attachments.length === 0 &&
+                              docs.length === 0) ||
+                            loading ||
+                            extracting
                           }
                         >
                           {loading ? (

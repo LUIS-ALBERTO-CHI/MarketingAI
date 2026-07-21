@@ -6,7 +6,31 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type ImgPart = { mediaType: string; data: string };
-type Msg = { role: "user" | "assistant"; content: string; images?: ImgPart[] };
+type DocPart = { name: string; text: string };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  images?: ImgPart[];
+  docs?: DocPart[];
+};
+
+// Antepone el texto de los archivos adjuntos (PDF/Word/Excel) al mensaje del
+// usuario. Funciona con TODOS los modelos porque es texto plano.
+function injectDocs(m: Msg): Msg {
+  if (m.role !== "user" || !m.docs?.length) return m;
+  const blocks = m.docs
+    .filter((d) => d && d.text && d.text.trim())
+    .map((d) => `--- Archivo: ${d.name} ---\n${d.text.trim()}`)
+    .join("\n\n");
+  if (!blocks) return m;
+  const userText =
+    m.content.trim() ||
+    "Analiza el/los archivo(s) adjunto(s) y responde en consecuencia.";
+  const content =
+    `Contenido de archivos adjuntos (extraído por el sistema):\n\n${blocks}\n\n` +
+    `--- Fin de archivos ---\n\n${userText}`;
+  return { ...m, content };
+}
 
 export async function POST(req: Request) {
   let body: {
@@ -24,13 +48,17 @@ export async function POST(req: Request) {
   const { system, messages, web } = body;
   const model = getModel(body.model || DEFAULT_MODEL);
 
-  const clean = (messages ?? []).filter(
-    (m) =>
-      (m.role === "user" || m.role === "assistant") &&
-      typeof m.content === "string" &&
-      (m.content.trim().length > 0 ||
-        (m.role === "user" && Array.isArray(m.images) && m.images.length > 0))
-  );
+  const clean = (messages ?? [])
+    .filter(
+      (m) =>
+        (m.role === "user" || m.role === "assistant") &&
+        typeof m.content === "string" &&
+        (m.content.trim().length > 0 ||
+          (m.role === "user" &&
+            ((Array.isArray(m.images) && m.images.length > 0) ||
+              (Array.isArray(m.docs) && m.docs.length > 0))))
+    )
+    .map(injectDocs);
 
   if (clean.length === 0) {
     return Response.json({ error: "No hay mensajes que enviar." }, { status: 400 });
