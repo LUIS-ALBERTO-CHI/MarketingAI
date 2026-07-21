@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { resolveAnthropicClient } from "@/lib/credentials";
-import { getModel, DEFAULT_MODEL, openRouterChain } from "@/lib/models";
+import { getModel, DEFAULT_MODEL } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
           await streamOpenRouter(controller, encoder, {
             system,
             messages: clean,
-            models: openRouterChain(model),
+            model: model.id,
           });
         } else {
           await streamAnthropic(controller, encoder, {
@@ -149,9 +149,9 @@ async function streamAnthropic(
 async function streamOpenRouter(
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
-  opts: { system?: string; messages: Msg[]; models: string[] }
+  opts: { system?: string; messages: Msg[]; model: string }
 ) {
-  const { system, messages, models } = opts;
+  const { system, messages, model } = opts;
   const key = process.env.OPENROUTER_API_KEY;
 
   if (!key) {
@@ -197,9 +197,7 @@ async function streamOpenRouter(
         "X-Title": "MarketingAI",
       },
       body: JSON.stringify({
-        // Relevo automático: OpenRouter usa el primer modelo disponible de la
-        // lista; si está agotado/caído/con límite, salta al siguiente solo.
-        models,
+        model,
         messages: oaMessages,
         stream: true,
         max_tokens: 4096,
